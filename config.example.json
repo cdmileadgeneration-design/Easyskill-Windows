@@ -1,0 +1,44 @@
+{
+  "app": {
+    "name": "Windows Monitoring",
+    "version": "2.1.0"
+  },
+  "dashboard": {
+    "port": 3000,
+    "host": "0.0.0.0"
+  },
+  "security": {
+    "jwtSecret": "change-this-to-secure-random-string",
+    "agentKey": "e67279936040e5f781500265df6338e427e0a323d7c29d01",
+    "adminUser": "admin",
+    "adminPassword": "admin",
+    "adminPasswordHash": "",
+    "sessionTimeout": 86400000,
+    "loginRateLimit": { "windowMs": 60000, "max": 10 },
+    "apiRateLimit": { "windowMs": 60000, "max": 600 }
+  },
+  "monitoring": {
+    "dataRetentionDays": 90
+  },
+  "database": {
+    "provider": "mongodb",
+    "mongodbUri": "",
+    "dbName": "windows_monitoring",
+    "sqlitePath": "database/monitor.db",
+    "auditPath": "database/audit.log"
+  },
+  "storage": {
+    "provider": "cloudinary",
+    "folder": "windows-monitoring/screenshots",
+    "localDir": "screenshots",
+    "cloudinaryCloudName": "",
+    "cloudinaryApiKey": "",
+    "cloudinaryApiSecret": "",
+    "cloudinaryFolder": "windows-monitoring/screenshots",
+    "s3Bucket": "",
+    "s3Region": "us-east-1",
+    "s3Prefix": "screenshots/",
+    "s3Endpoint": "",
+    "s3ForcePathStyle": "false"
+  }
+}

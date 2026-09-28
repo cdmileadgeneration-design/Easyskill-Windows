@@ -455,3 +455,7 @@
 [2026-09-28T10:04:30.902Z] Send failed (50x): . 847 events queued.
 [2026-09-28T10:14:32.214Z] Send failed (60x): . 1031 events queued.
 [2026-09-28T10:24:33.341Z] Send failed (70x): . 1340 events queued.
+[2026-09-28T10:34:35.589Z] Send failed (80x): . 1576 events queued.
+[2026-09-28T10:44:36.398Z] Send failed (90x): . 1820 events queued.
+[2026-09-28T10:50:28.622Z] Stopping agent...
+[2026-09-28T10:50:28.671Z] Agent stopped (1912 events still queued)

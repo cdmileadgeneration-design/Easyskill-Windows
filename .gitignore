@@ -1,0 +1,17 @@
+# secrets / local config
+/.env
+/config.json
+
+# dependencies
+node_modules/
+
+# runtime data
+/database/
+/screenshots/
+agent/agent.log
+agent/outbox.json
+
+# logs / os noise
+*.log
+.DS_Store
+Thumbs.db
