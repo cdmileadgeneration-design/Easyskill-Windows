@@ -1,0 +1,18 @@
+{
+  "name": "monitoring-agent",
+  "version": "2.1.0",
+  "description": "Windows employee monitoring agent - collects activity and streams it to the dashboard",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js",
+    "dev": "nodemon monitor.js",
+    "install-service": "node install-service.js --install",
+    "uninstall-service": "node install-service.js --uninstall",
+    "service-status": "node install-service.js --status"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3",
+    "node-windows": "^1.0.0",
+    "sql.js": "^1.9.0"
+  }
+}

@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activity Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #eee; }
+        
+        .login-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .login-box { background: #2a2a2a; padding: 40px; border-radius: 8px; width: 320px; }
+        .login-box h2 { text-align: center; margin-bottom: 25px; color: #fff; font-size: 18px; }
+        .login-box input { width: 100%; padding: 10px; margin: 6px 0; border: 1px solid #444; border-radius: 4px; background: #333; color: #fff; font-size: 14px; }
+        .login-box button { width: 100%; padding: 10px; margin-top: 12px; border: none; border-radius: 4px; background: #4a90d9; color: white; cursor: pointer; font-size: 14px; }
+        .login-box button:hover { background: #357abd; }
+        
+        .dashboard { display: none; height: 100vh; flex-direction: column; }
+        .dashboard.active { display: flex; }
+        
+        .top-bar { background: #2a2a2a; padding: 8px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .top-bar h1 { font-size: 14px; color: #ccc; font-weight: normal; }
+        .top-bar .user-info { display: flex; align-items: center; gap: 15px; font-size: 13px; }
+        
+        .date-bar { background: #252525; padding: 8px 15px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #333; flex-wrap: wrap; }
+        .date-bar .date-nav { display: flex; align-items: center; gap: 8px; }
+        .date-bar button { padding: 4px 10px; border: 1px solid #444; background: #333; border-radius: 3px; cursor: pointer; color: #ccc; font-size: 12px; }
+        .date-bar button:hover { background: #444; }
+        .date-bar input[type="date"] { padding: 4px 8px; border: 1px solid #444; border-radius: 3px; background: #333; color: #fff; font-size: 12px; }
+        .date-bar .today-btn { background: #4a90d9; border-color: #4a90d9; color: #fff; }
+        .date-bar .ss-btn { background: #4a90d9; border-color: #4a90d9; color: #fff; margin-left: auto; }
+        .date-bar .ss-btn:hover { background: #357abd; }
+        
+        .machine-selector { display: flex; align-items: center; gap: 8px; }
+        .machine-selector select { padding: 4px 8px; border: 1px solid #444; border-radius: 3px; background: #333; color: #fff; font-size: 12px; min-width: 150px; }
+        .machine-status { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .machine-status.online { background: #2ecc71; }
+        .machine-status.offline { background: #e74c3c; }
+        
+        .timeline-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        .timeline-header { display: flex; background: #222; border-bottom: 1px solid #333; }
+        .timeline-label-col { width: 140px; min-width: 140px; background: #222; border-right: 1px solid #333; }
+        .timeline-hour-row { display: flex; flex: 1; }
+        .timeline-hour { width: 4.166%; text-align: center; font-size: 10px; color: #888; padding: 4px 0; border-right: 1px solid #333; }
+        
+        .lane { display: flex; border-bottom: 1px solid #333; min-height: 30px; }
+        .lane-label { width: 140px; min-width: 140px; background: #252525; border-right: 1px solid #333; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: #aaa; user-select: none; }
+        .lane-content { flex: 1; position: relative; background: #1e1e1e; }
+        .lane-grid { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; pointer-events: none; }
+        .lane-grid-line { flex: 1; border-right: 1px solid #2a2a2a; }
+        
+        .block { position: absolute; height: 20px; top: 5px; border-radius: 2px; cursor: pointer; min-width: 2px; }
+        .block:hover { filter: brightness(1.3); z-index: 10; }
+        
+        .doc-block { position: absolute; height: 16px; top: 7px; border-radius: 2px; cursor: pointer; min-width: 2px; }
+        .doc-block:hover { filter: brightness(1.3); z-index: 10; }
+        
+        .event-marker { position: absolute; width: 12px; height: 12px; top: 9px; border-radius: 50%; cursor: pointer; transform: translateX(-6px); }
+        .event-marker:hover { filter: brightness(1.3); z-index: 10; }
+        
+        .tooltip { position: fixed; background: #333; color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 12px; z-index: 1000; pointer-events: none; max-width: 400px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); white-space: pre-line; }
+        .tooltip .tt-app { font-weight: bold; margin-bottom: 3px; }
+        .tooltip .tt-doc { color: #aaa; }
+        .tooltip .tt-time { color: #888; font-size: 11px; margin-top: 3px; }
+        
+        .detail-panel { background: #252525; border-top: 1px solid #333; height: 180px; overflow: auto; }
+        .detail-tabs { display: flex; background: #2a2a2a; border-bottom: 1px solid #333; }
+        .detail-tab { padding: 6px 15px; font-size: 12px; color: #888; cursor: pointer; border-bottom: 2px solid transparent; }
+        .detail-tab:hover { color: #ccc; }
+        .detail-tab.active { color: #4a90d9; border-bottom-color: #4a90d9; }
+        .detail-content { display: none; }
+        .detail-content.active { display: block; }
+        .detail-panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .detail-panel th { background: #2a2a2a; padding: 6px 10px; text-align: left; color: #aaa; font-weight: normal; border-bottom: 1px solid #333; position: sticky; top: 0; }
+        .detail-panel td { padding: 5px 10px; border-bottom: 1px solid #2a2a2a; color: #ccc; }
+        .detail-panel tr:hover { background: #2a2a2a; }
+        .detail-panel .color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+        
+        .app-legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 15px; background: #252525; border-bottom: 1px solid #333; }
+        .legend-item { display: flex; align-items: center; font-size: 11px; color: #aaa; }
+        .legend-color { width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; }
+        
+        .ss-status { font-size: 11px; display: none; padding: 4px 8px; border-radius: 3px; }
+        
+        .ss-panel { display: none; flex: 1; overflow-y: auto; padding: 20px; }
+        .ss-panel.active { display: block; }
+        .ss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+        .ss-card { background: #252525; border-radius: 6px; overflow: hidden; cursor: pointer; }
+        .ss-card img { width: 100%; height: 200px; object-fit: cover; display: block; }
+        .ss-card .ss-info { padding: 10px; }
+        .ss-card .ss-time { font-size: 12px; color: #aaa; }
+        .ss-card .ss-reason { font-size: 11px; color: #666; }
+        .ss-card .ss-machine { font-size: 11px; color: #4a90d9; margin-top: 4px; }
+        .ss-empty { color: #666; text-align: center; padding: 40px; font-size: 13px; }
+        
+        .ss-viewer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2000; cursor: pointer; }
+        .ss-viewer.active { display: flex; }
+        .ss-viewer img { max-width: 90%; max-height: 90%; border-radius: 4px; }
+
+        .summary-cards { display: flex; gap: 15px; padding: 15px; background: #252525; border-bottom: 1px solid #333; }
+        .summary-card { background: #2a2a2a; border-radius: 6px; padding: 15px; flex: 1; }
+        .summary-card h3 { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+        .summary-card .value { font-size: 24px; font-weight: bold; color: #4a90d9; }
+        .summary-card .label { font-size: 11px; color: #666; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div id="loginPage" class="login-container">
+        <div class="login-box">
+            <h2>Activity Monitor</h2>
+            <form id="loginForm">
+                <input type="text" id="username" placeholder="Username" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboardPage" class="dashboard">
+        <div class="top-bar">
+            <h1>Activity Monitor</h1>
+            <div class="user-info">
+                <span id="currentUser"></span>
+                <button onclick="logout()" style="padding:4px 10px;border:1px solid #444;background:#333;border-radius:3px;color:#ccc;cursor:pointer;font-size:12px;">Sign Out</button>
+            </div>
+        </div>
+        
+        <div id="dateBar" class="date-bar">
+            <div class="machine-selector">
+                <span class="machine-status" id="machineStatus"></span>
+                <select id="machineSelect" onchange="onMachineChange()">
+                    <option value="">Loading machines...</option>
+                </select>
+            </div>
+            <div class="date-nav">
+                <button onclick="changeDate(-1)">◀</button>
+                <input type="date" id="timelineDate" onchange="loadTimeline()">
+                <button onclick="changeDate(1)">▶</button>
+                <button class="today-btn" onclick="goToday()">Today</button>
+            </div>
+            <div style="display:flex;gap:5px;margin-left:20px;">
+                <button id="tabTimeline" class="today-btn" onclick="switchView('timeline')" style="background:#4a90d9;border-color:#4a90d9;color:#fff;">Timeline</button>
+                <button id="tabScreenshots" onclick="switchView('screenshots')" style="background:#333;border-color:#444;color:#ccc;">Screenshots</button>
+            </div>
+            <div id="ssStatus" class="ss-status"></div>
+            <button class="ss-btn" onclick="takeScreenshot()">Screenshot</button>
+        </div>
+        
+        <div id="summaryCards" class="summary-cards">
+            <div class="summary-card">
+                <h3>Unique Apps</h3>
+                <div class="value" id="sumApps">0</div>
+                <div class="label">applications used</div>
+            </div>
+            <div class="summary-card">
+                <h3>Active Time</h3>
+                <div class="value" id="sumActive">0:00</div>
+                <div class="label">total usage</div>
+            </div>
+            <div class="summary-card">
+                <h3>Websites</h3>
+                <div class="value" id="sumSites">0</div>
+                <div class="label">sites visited</div>
+            </div>
+            <div class="summary-card">
+                <h3>Files</h3>
+                <div class="value" id="sumFiles">0</div>
+                <div class="label">file activities</div>
+            </div>
+            <div class="summary-card">
+                <h3>USB Events</h3>
+                <div class="value" id="sumUsb">0</div>
+                <div class="label">device events</div>
+            </div>
+        </div>
+
+        <div class="app-legend" id="appLegend"></div>
+
+        <div id="timelineView" class="timeline-area">
+            <div class="timeline-header">
+                <div class="timeline-label-col"></div>
+                <div class="timeline-hour-row" id="hourRow"></div>
+            </div>
+            <div id="lanes"></div>
+        </div>
+        
+        <div id="ssView" class="ss-panel">
+            <div class="ss-grid" id="ssGrid"></div>
+        </div>
+
+        <div id="detailPanel" class="detail-panel">
+            <div class="detail-tabs">
+                <div class="detail-tab active" onclick="switchDetailTab('applications', this)">Applications</div>
+                <div class="detail-tab" onclick="switchDetailTab('websites', this)">Websites</div>
+                <div class="detail-tab" onclick="switchDetailTab('files', this)">Files</div>
+                <div class="detail-tab" onclick="switchDetailTab('usb', this)">USB</div>
+                <div class="detail-tab" onclick="switchDetailTab('system', this)">System</div>
+            </div>
+            <div id="detail-applications" class="detail-content active">
+                <table>
+                    <thead><tr><th style="width:30px;"></th><th>Title</th><th style="width:100px;">Start</th><th style="width:100px;">End</th><th style="width:80px;">Duration</th></tr></thead>
+                    <tbody id="detailBody"></tbody>
+                </table>
+            </div>
+            <div id="detail-websites" class="detail-content">
+                <table>
+                    <thead><tr><th style="width:30px;"></th><th>URL</th><th>Title</th><th style="width:80px;">Browser</th><th style="width:100px;">Time</th></tr></thead>
+                    <tbody id="websiteBody"></tbody>
+                </table>
+            </div>
+            <div id="detail-files" class="detail-content">
+                <table>
+                    <thead><tr><th style="width:30px;"></th><th>File</th><th style="width:80px;">Action</th><th style="width:100px;">Time</th></tr></thead>
+                    <tbody id="fileBody"></tbody>
+                </table>
+            </div>
+            <div id="detail-usb" class="detail-content">
+                <table>
+                    <thead><tr><th style="width:30px;"></th><th>Device</th><th style="width:80px;">Event</th><th style="width:100px;">Time</th></tr></thead>
+                    <tbody id="usbBody"></tbody>
+                </table>
+            </div>
+            <div id="detail-system" class="detail-content">
+                <table>
+                    <thead><tr><th style="width:30px;"></th><th>Event</th><th>Data</th><th style="width:100px;">Time</th></tr></thead>
+                    <tbody id="systemBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <div id="tooltip" class="tooltip" style="display:none;"></div>
+    <div id="ssViewer" class="ss-viewer" onclick="this.classList.remove('active')"><img id="ssViewerImg"></div>
+
+    <script>
+        let token = null;
+        const API = window.location.origin + '/api';
+        const COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63','#00bcd4','#8bc34a','#ff5722','#607d8b','#795548','#cddc39','#009688','#673ab7'];
+        const BROWSER_COLORS = { chrome: '#3498db', edge: '#2ecc71', firefox: '#e67e22' };
+        const FILE_COLORS = { create: '#2ecc71', delete: '#e74c3c', modify: '#f39c12', access: '#3498db' };
+        const USB_COLORS = { connect: '#2ecc71', disconnect: '#e74c3c' };
+        const SYSTEM_COLORS = { idle: '#f39c12', active: '#2ecc71', shutdown: '#e74c3c' };
+        const appColors = {};
+        let currentView = 'timeline';
+        let currentMachine = '';
+        let machines = [];
+
+        function esc(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        function baseName(p) {
+            const s = String(p || '');
+            return s.split('\\').pop() || s;
+        }
+
+        function getAppColor(name) {
+            if (!appColors[name]) appColors[name] = COLORS[Object.keys(appColors).length % COLORS.length];
+            return appColors[name];
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const r = await fetch(`${API}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username:document.getElementById('username').value, password:document.getElementById('password').value}) });
+                const d = await r.json();
+                if (d.token) {
+                    token = d.token;
+                    document.getElementById('loginPage').style.display = 'none';
+                    document.getElementById('dashboardPage').classList.add('active');
+                    document.getElementById('currentUser').textContent = d.user.username;
+                    document.getElementById('timelineDate').value = new Date().toISOString().split('T')[0];
+                    await loadMachines();
+                    loadTimeline();
+                } else { alert(d.error || 'Invalid credentials'); }
+            } catch(e) { alert('Connection error'); }
+        });
+
+        async function api(endpoint, params={}) {
+            const url = new URL(`${API}${endpoint}`);
+            Object.entries(params).forEach(([k,v])=>{ if(v !== undefined && v !== null && v !== '') url.searchParams.append(k,v); });
+            const r = await fetch(url, { headers:{'Authorization':`Bearer ${token}`} });
+            if (r.status === 401) { logout(); throw new Error('Session expired'); }
+            return r.json();
+        }
+
+        async function loadMachines() {
+            try {
+                machines = await api('/machines');
+                const select = document.getElementById('machineSelect');
+                select.innerHTML = '<option value="">All Machines</option>';
+                machines.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.machine_name;
+                    opt.textContent = `${m.machine_name} (${m.ip})`;
+                    select.appendChild(opt);
+                });
+                updateMachineStatus();
+            } catch(e) {
+                console.error('Failed to load machines:', e);
+            }
+        }
+
+        function updateMachineStatus() {
+            const status = document.getElementById('machineStatus');
+            if (!currentMachine) {
+                status.className = 'machine-status online';
+                return;
+            }
+            const machine = machines.find(m => m.machine_name === currentMachine);
+            if (machine) {
+                const lastSeen = new Date(machine.last_seen);
+                const isOnline = (Date.now() - lastSeen.getTime()) < 300000;
+                status.className = `machine-status ${isOnline ? 'online' : 'offline'}`;
+            }
+        }
+
+        function onMachineChange() {
+            currentMachine = document.getElementById('machineSelect').value;
+            updateMachineStatus();
+            if (currentView === 'timeline') loadTimeline();
+            if (currentView === 'screenshots') loadScreenshots();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('timelineView').style.display = view === 'timeline' ? 'flex' : 'none';
+            document.getElementById('ssView').classList.toggle('active', view === 'screenshots');
+            document.getElementById('detailPanel').style.display = view === 'timeline' ? 'block' : 'none';
+            document.getElementById('appLegend').style.display = view === 'timeline' ? 'flex' : 'none';
+            document.getElementById('summaryCards').style.display = view === 'timeline' ? 'flex' : 'none';
+            
+            const tabTl = document.getElementById('tabTimeline');
+            const tabSs = document.getElementById('tabScreenshots');
+            if (view === 'timeline') {
+                tabTl.style.background = '#4a90d9'; tabTl.style.borderColor = '#4a90d9'; tabTl.style.color = '#fff';
+                tabSs.style.background = '#333'; tabSs.style.borderColor = '#444'; tabSs.style.color = '#ccc';
+            } else {
+                tabSs.style.background = '#4a90d9'; tabSs.style.borderColor = '#4a90d9'; tabSs.style.color = '#fff';
+                tabTl.style.background = '#333'; tabTl.style.borderColor = '#444'; tabTl.style.color = '#ccc';
+            }
+            
+            if (view === 'timeline') loadTimeline();
+            if (view === 'screenshots') loadScreenshots();
+        }
+
+        function switchDetailTab(tab, el) {
+            document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.detail-content').forEach(c => c.classList.remove('active'));
+            if (el) el.classList.add('active');
+            document.getElementById(`detail-${tab}`).classList.add('active');
+        }
+
+        async function loadTimeline() {
+            const date = document.getElementById('timelineDate').value;
+            const params = { 
+                startDate: date+'T00:00:00', 
+                endDate: date+'T23:59:59',
+                machine_name: currentMachine
+            };
+
+            const [appData, fileData, websiteData, usbData, systemData, summary] = await Promise.all([
+                api('/stats/applications/raw', params),
+                api('/stats/files', params),
+                api('/stats/websites/raw', params),
+                api('/stats/usb/raw', params),
+                api('/stats/events/raw', params),
+                api('/dashboard/summary', { date, machine_name: currentMachine })
+            ]);
+            
+            const apps = [...new Set(appData.map(e => e.process_name))];
+            apps.forEach(a => getAppColor(a));
+            
+            const legend = document.getElementById('appLegend');
+            legend.innerHTML = apps.slice(0, 20).map(a => `<div class="legend-item"><div class="legend-color" style="background:${appColors[a]}"></div>${esc(a)}</div>`).join('');
+            
+            if (summary.applications) {
+                document.getElementById('sumApps').textContent = summary.applications.unique_apps || 0;
+                document.getElementById('sumActive').textContent = formatDur(summary.applications.total_active_time || 0);
+            }
+            if (summary.websites) {
+                document.getElementById('sumSites').textContent = summary.websites.unique_sites || 0;
+            }
+            if (summary.files) {
+                const totalFiles = (summary.files.files_created || 0) + (summary.files.files_deleted || 0) + (summary.files.files_modified || 0);
+                document.getElementById('sumFiles').textContent = totalFiles;
+            }
+            if (summary.usb) {
+                document.getElementById('sumUsb').textContent = summary.usb.total_events || 0;
+            }
+            
+            const hourRow = document.getElementById('hourRow');
+            hourRow.innerHTML = '';
+            for (let h = 0; h < 24; h++) {
+                const div = document.createElement('div');
+                div.className = 'timeline-hour';
+                div.textContent = h.toString().padStart(2,'0') + ':00';
+                hourRow.appendChild(div);
+            }
+            
+            const lanesDiv = document.getElementById('lanes');
+            lanesDiv.innerHTML = '';
+            
+            buildAppLane(lanesDiv, 'Applications', appData);
+            buildFileLane(lanesDiv, 'Documents', fileData);
+            buildWebsiteLane(lanesDiv, 'Websites', websiteData);
+            buildUsbLane(lanesDiv, 'USB', usbData);
+            buildSystemLane(lanesDiv, 'System', systemData);
+            
+            const tbody = document.getElementById('detailBody');
+            const sorted = [...appData].sort((a,b) => new Date(b.start_time) - new Date(a.start_time));
+            tbody.innerHTML = sorted.slice(0, 100).map(e => {
+                const color = appColors[e.process_name] || '#666';
+                const start = new Date(e.start_time);
+                const end = new Date(e.end_time);
+                return `<tr><td><span class="color-dot" style="background:${color}"></span></td><td>${esc(e.window_title || e.process_name)}</td><td>${start.toLocaleTimeString()}</td><td>${end.toLocaleTimeString()}</td><td>${formatDur(e.duration)}</td></tr>`;
+            }).join('');
+
+            const websiteBody = document.getElementById('websiteBody');
+            const sortedWebsites = [...websiteData].sort((a,b) => new Date(b.visit_time) - new Date(a.visit_time));
+            websiteBody.innerHTML = sortedWebsites.slice(0, 100).map(e => {
+                const color = BROWSER_COLORS[e.browser] || '#666';
+                const time = new Date(e.visit_time);
+                return `<tr><td><span class="color-dot" style="background:${color}"></span></td><td>${esc(e.url || '')}</td><td>${esc(e.title || '')}</td><td>${esc(e.browser || '')}</td><td>${time.toLocaleTimeString()}</td></tr>`;
+            }).join('');
+
+            const fileBody = document.getElementById('fileBody');
+            const sortedFiles = [...fileData].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+            fileBody.innerHTML = sortedFiles.slice(0, 100).map(e => {
+                const color = FILE_COLORS[e.activity_type] || '#666';
+                const fileName = baseName(e.file_path);
+                const time = new Date(e.timestamp);
+                return `<tr><td><span class="color-dot" style="background:${color}"></span></td><td>${esc(fileName)}</td><td>${esc(e.activity_type)}</td><td>${time.toLocaleTimeString()}</td></tr>`;
+            }).join('');
+
+            const usbBody = document.getElementById('usbBody');
+            const sortedUsb = [...usbData].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+            usbBody.innerHTML = sortedUsb.slice(0, 100).map(e => {
+                const color = USB_COLORS[e.event_type] || '#666';
+                const time = new Date(e.timestamp);
+                return `<tr><td><span class="color-dot" style="background:${color}"></span></td><td>${esc(e.device_name || 'Unknown')}</td><td>${esc(e.event_type)}</td><td>${time.toLocaleTimeString()}</td></tr>`;
+            }).join('');
+
+            const systemBody = document.getElementById('systemBody');
+            const sortedSystem = [...systemData].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+            systemBody.innerHTML = sortedSystem.slice(0, 100).map(e => {
+                const time = new Date(e.timestamp);
+                return `<tr><td><span class="color-dot" style="background:#666"></span></td><td>${esc(e.event_type)}</td><td>${esc(e.event_data || '')}</td><td>${time.toLocaleTimeString()}</td></tr>`;
+            }).join('');
+        }
+
+        function buildAppLane(container, name, data) {
+            const lane = document.createElement('div');
+            lane.className = 'lane';
+            const label = document.createElement('div');
+            label.className = 'lane-label';
+            label.textContent = name;
+            const content = document.createElement('div');
+            content.className = 'lane-content';
+            const grid = document.createElement('div');
+            grid.className = 'lane-grid';
+            for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
+            content.appendChild(grid);
+            
+            data.forEach(entry => {
+                const start = new Date(entry.start_time);
+                const end = new Date(entry.end_time);
+                const startMin = start.getHours() * 60 + start.getMinutes();
+                const endMin = end.getHours() * 60 + end.getMinutes();
+                const left = (startMin / 1440) * 100;
+                const width = Math.max(((endMin - startMin) / 1440) * 100, 0.3);
+                
+                const block = document.createElement('div');
+                block.className = 'block';
+                block.style.left = left + '%';
+                block.style.width = width + '%';
+                block.style.backgroundColor = appColors[entry.process_name] || '#666';
+                
+                block.addEventListener('mouseenter', (e) => {
+                    const tt = document.getElementById('tooltip');
+                    tt.innerHTML = `<div class="tt-app">${esc(entry.process_name)}</div><div class="tt-doc">${esc(entry.window_title || 'N/A')}</div><div class="tt-time">${start.toLocaleTimeString()} - ${end.toLocaleTimeString()} (${formatDur(entry.duration)})</div>`;
+                    tt.style.display = 'block';
+                    tt.style.left = (e.clientX + 15) + 'px';
+                    tt.style.top = (e.clientY - 10) + 'px';
+                });
+                block.addEventListener('mousemove', (e) => { const tt = document.getElementById('tooltip'); tt.style.left = (e.clientX + 15) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; });
+                block.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+                
+                content.appendChild(block);
+            });
+            
+            lane.appendChild(label);
+            lane.appendChild(content);
+            container.appendChild(lane);
+        }
+
+        function buildFileLane(container, name, data) {
+            const lane = document.createElement('div');
+            lane.className = 'lane';
+            const label = document.createElement('div');
+            label.className = 'lane-label';
+            label.textContent = name;
+            const content = document.createElement('div');
+            content.className = 'lane-content';
+            const grid = document.createElement('div');
+            grid.className = 'lane-grid';
+            for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
+            content.appendChild(grid);
+            
+            data.forEach(entry => {
+                const ts = new Date(entry.timestamp);
+                const min = ts.getHours() * 60 + ts.getMinutes();
+                const left = (min / 1440) * 100;
+                const color = FILE_COLORS[entry.activity_type] || '#666';
+                const fileName = baseName(entry.file_path);
+                
+                const block = document.createElement('div');
+                block.className = 'doc-block';
+                block.style.left = left + '%';
+                block.style.width = '0.5%';
+                block.style.backgroundColor = color;
+                
+                block.addEventListener('mouseenter', (e) => {
+                    const tt = document.getElementById('tooltip');
+                    tt.innerHTML = `<div class="tt-app" style="color:${color}">${esc(entry.activity_type.toUpperCase())}</div><div class="tt-doc">${esc(fileName)}</div><div class="tt-doc" style="font-size:10px;color:#666;">${esc(entry.file_path)}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
+                    tt.style.display = 'block';
+                    tt.style.left = (e.clientX + 15) + 'px';
+                    tt.style.top = (e.clientY - 10) + 'px';
+                });
+                block.addEventListener('mousemove', (e) => { const tt = document.getElementById('tooltip'); tt.style.left = (e.clientX + 15) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; });
+                block.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+                
+                content.appendChild(block);
+            });
+            
+            lane.appendChild(label);
+            lane.appendChild(content);
+            container.appendChild(lane);
+        }
+
+        function buildWebsiteLane(container, name, data) {
+            const lane = document.createElement('div');
+            lane.className = 'lane';
+            const label = document.createElement('div');
+            label.className = 'lane-label';
+            label.textContent = name;
+            const content = document.createElement('div');
+            content.className = 'lane-content';
+            const grid = document.createElement('div');
+            grid.className = 'lane-grid';
+            for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
+            content.appendChild(grid);
+            
+            data.forEach(entry => {
+                const ts = new Date(entry.visit_time);
+                const min = ts.getHours() * 60 + ts.getMinutes();
+                const left = (min / 1440) * 100;
+                const color = BROWSER_COLORS[entry.browser] || '#666';
+                
+                const block = document.createElement('div');
+                block.className = 'doc-block';
+                block.style.left = left + '%';
+                block.style.width = '0.5%';
+                block.style.backgroundColor = color;
+                
+                block.addEventListener('mouseenter', (e) => {
+                    const tt = document.getElementById('tooltip');
+                    tt.innerHTML = `<div class="tt-app" style="color:${color}">${esc(entry.browser)}</div><div class="tt-doc">${esc(entry.title || entry.url || 'N/A')}</div><div class="tt-doc" style="font-size:10px;color:#666;">${esc(entry.url || '')}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
+                    tt.style.display = 'block';
+                    tt.style.left = (e.clientX + 15) + 'px';
+                    tt.style.top = (e.clientY - 10) + 'px';
+                });
+                block.addEventListener('mousemove', (e) => { const tt = document.getElementById('tooltip'); tt.style.left = (e.clientX + 15) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; });
+                block.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+                
+                content.appendChild(block);
+            });
+            
+            lane.appendChild(label);
+            lane.appendChild(content);
+            container.appendChild(lane);
+        }
+
+        function buildUsbLane(container, name, data) {
+            const lane = document.createElement('div');
+            lane.className = 'lane';
+            const label = document.createElement('div');
+            label.className = 'lane-label';
+            label.textContent = name;
+            const content = document.createElement('div');
+            content.className = 'lane-content';
+            const grid = document.createElement('div');
+            grid.className = 'lane-grid';
+            for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
+            content.appendChild(grid);
+            
+            data.forEach(entry => {
+                const ts = new Date(entry.timestamp);
+                const min = ts.getHours() * 60 + ts.getMinutes();
+                const left = (min / 1440) * 100;
+                const color = USB_COLORS[entry.event_type] || '#666';
+                
+                const marker = document.createElement('div');
+                marker.className = 'event-marker';
+                marker.style.left = left + '%';
+                marker.style.backgroundColor = color;
+                
+                marker.addEventListener('mouseenter', (e) => {
+                    const tt = document.getElementById('tooltip');
+                    tt.innerHTML = `<div class="tt-app" style="color:${color}">USB ${esc(entry.event_type)}</div><div class="tt-doc">${esc(entry.device_name || 'Unknown Device')}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
+                    tt.style.display = 'block';
+                    tt.style.left = (e.clientX + 15) + 'px';
+                    tt.style.top = (e.clientY - 10) + 'px';
+                });
+                marker.addEventListener('mousemove', (e) => { const tt = document.getElementById('tooltip'); tt.style.left = (e.clientX + 15) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; });
+                marker.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+                
+                content.appendChild(marker);
+            });
+            
+            lane.appendChild(label);
+            lane.appendChild(content);
+            container.appendChild(lane);
+        }
+
+        function buildSystemLane(container, name, data) {
+            const lane = document.createElement('div');
+            lane.className = 'lane';
+            const label = document.createElement('div');
+            label.className = 'lane-label';
+            label.textContent = name;
+            const content = document.createElement('div');
+            content.className = 'lane-content';
+            const grid = document.createElement('div');
+            grid.className = 'lane-grid';
+            for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
+            content.appendChild(grid);
+            
+            const idleEvents = data.filter(e => e.event_type === 'idle_start' || e.event_type === 'idle_end');
+            idleEvents.forEach(entry => {
+                const ts = new Date(entry.timestamp);
+                const min = ts.getHours() * 60 + ts.getMinutes();
+                const left = (min / 1440) * 100;
+                const isIdle = entry.event_type === 'idle_start';
+                const color = isIdle ? SYSTEM_COLORS.idle : SYSTEM_COLORS.active;
+                
+                const marker = document.createElement('div');
+                marker.className = 'event-marker';
+                marker.style.left = left + '%';
+                marker.style.backgroundColor = color;
+                
+                marker.addEventListener('mouseenter', (e) => {
+                    const tt = document.getElementById('tooltip');
+                    tt.innerHTML = `<div class="tt-app" style="color:${color}">${isIdle ? 'Idle Started' : 'Active Again'}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
+                    tt.style.display = 'block';
+                    tt.style.left = (e.clientX + 15) + 'px';
+                    tt.style.top = (e.clientY - 10) + 'px';
+                });
+                marker.addEventListener('mousemove', (e) => { const tt = document.getElementById('tooltip'); tt.style.left = (e.clientX + 15) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; });
+                marker.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+                
+                content.appendChild(marker);
+            });
+            
+            lane.appendChild(label);
+            lane.appendChild(content);
+            container.appendChild(lane);
+        }
+
+        async function loadScreenshots() {
+            const params = { machine_name: currentMachine };
+            const data = await api('/screenshots', params);
+            const grid = document.getElementById('ssGrid');
+            if (!data.length) { grid.innerHTML = '<div class="ss-empty">No screenshots yet. Click the Screenshot button to capture one.</div>'; return; }
+            grid.innerHTML = data.map(s => `<div class="ss-card" onclick="viewScreenshot(${s.id})"><div id="ssimg-${s.id}" style="height:200px;background:#333;display:flex;align-items:center;justify-content:center;color:#666;">Loading...</div><div class="ss-info"><div class="ss-time">${new Date(s.timestamp).toLocaleString()}</div><div class="ss-reason">${esc(s.reason)}</div><div class="ss-machine">${esc(s.machine_name || 'Local')}</div></div></div>`).join('');
+            data.forEach(s => loadSSImage(s.id));
+        }
+
+        async function loadSSImage(id) {
+            try {
+                const r = await fetch(`${API}/screenshots/base64/${id}?token=${token}`);
+                const d = await r.json();
+                if (d.image) { const el = document.getElementById(`ssimg-${id}`); if (el) el.innerHTML = `<img src="data:image/jpeg;base64,${d.image}" style="width:100%;height:200px;object-fit:cover;">`; }
+            } catch(e) {}
+        }
+
+        function viewScreenshot(id) {
+            document.getElementById('ssViewerImg').src = `${API}/screenshots/image/${id}?token=${token}`;
+            document.getElementById('ssViewer').classList.add('active');
+        }
+
+        async function takeScreenshot() {
+            const status = document.getElementById('ssStatus');
+            status.style.display = 'inline';
+            status.style.background = '#333';
+            status.style.color = '#aaa';
+            status.textContent = 'Capturing...';
+            try {
+                const r = await fetch(`${API}/screenshots/capture`, { method:'POST', headers:{'Authorization':`Bearer ${token}`, 'Content-Type':'application/json'} });
+                const d = await r.json();
+                if (d.success) {
+                    status.style.background = '#1a472a';
+                    status.style.color = '#2ecc71';
+                    status.textContent = 'Saved!';
+                    switchView('screenshots');
+                } else {
+                    status.style.background = '#4a1a1a';
+                    status.style.color = '#e74c3c';
+                    status.textContent = 'Failed';
+                }
+            } catch(e) {
+                status.style.background = '#4a1a1a';
+                status.style.color = '#e74c3c';
+                status.textContent = 'Error';
+            }
+            setTimeout(() => { status.style.display = 'none'; }, 2000);
+        }
+
+        function formatDur(sec) {
+            if (!sec) return '0:00';
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = Math.floor(sec % 60);
+            if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+            return `${m}:${s.toString().padStart(2,'0')}`;
+        }
+
+        function changeDate(delta) {
+            const input = document.getElementById('timelineDate');
+            const d = new Date(input.value);
+            d.setDate(d.getDate() + delta);
+            input.value = d.toISOString().split('T')[0];
+            if (currentView === 'timeline') loadTimeline();
+        }
+
+        function goToday() {
+            document.getElementById('timelineDate').value = new Date().toISOString().split('T')[0];
+            if (currentView === 'timeline') loadTimeline();
+        }
+
+        function logout() {
+            token = null;
+            document.getElementById('dashboardPage').classList.remove('active');
+            document.getElementById('loginPage').style.display = 'flex';
+        }
+    </script>
+</body>
+</html>

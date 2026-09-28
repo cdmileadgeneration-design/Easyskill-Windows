@@ -1,0 +1,13 @@
+{
+  "serverUrl": "http://localhost:3000",
+  "agentKey": "e67279936040e5f781500265df6338e427e0a323d7c29d01",
+  "machineName": "",
+  "sendInterval": 10000,
+  "batchSize": 50,
+  "maxQueue": 50000,
+  "screenshotInterval": 300000,
+  "idleThreshold": 300000,
+  "enableScreenshots": true,
+  "processPollInterval": 300000,
+  "networkPollInterval": 300000
+}
