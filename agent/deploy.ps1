@@ -20,9 +20,14 @@
                                       supervisor if anything killed it
     7. Starts it and verifies that processes are alive + the log is flowing.
 
-  The supervisor starts monitor.js *inside each logged-in user's desktop
+  The supervisor starts the monitor *inside each logged-in user's desktop
   session* (not in Session 0), which is what makes window titles, idle time,
   screenshots and Chrome history actually reflect the employee.
+
+  Runtime: if a prebuilt executable exists in dist\ (see tools/build.js) it is
+  installed instead of Node.js - one file, no runtime, no node_modules and no
+  process called node.exe on the employee's machine. Without dist\ this falls
+  back to a normal Node.js install.
 
   Other modes:
       powershell -ExecutionPolicy Bypass -File deploy.ps1 -Status
@@ -282,8 +287,15 @@ function Write-AgentConfig {
 function Register-AgentTasks {
     param([string]$NodeExe, [string]$WorkDir)
 
-    $actionSup  = New-ScheduledTaskAction -Execute $NodeExe -Argument "`"$WorkDir\supervisor.js`"" -WorkingDirectory $WorkDir
-    $actionKeep = New-ScheduledTaskAction -Execute $NodeExe -Argument "`"$WorkDir\supervisor.js`" --once" -WorkingDirectory $WorkDir
+    # Bundled exe dispatches on flags; source install runs the script files.
+    $supArg, $keepArg = if ($script:BundledExe) {
+        @('--supervisor', '--supervisor --once')
+    } else {
+        @("`"$WorkDir\supervisor.js`"", "`"$WorkDir\supervisor.js`" --once")
+    }
+
+    $actionSup  = New-ScheduledTaskAction -Execute $NodeExe -Argument $supArg -WorkingDirectory $WorkDir
+    $actionKeep = New-ScheduledTaskAction -Execute $NodeExe -Argument $keepArg -WorkingDirectory $WorkDir
 
     # Boot: start as soon as Windows comes up, before anyone logs on.
     $tBoot = New-ScheduledTaskTrigger -AtStartup
@@ -355,7 +367,35 @@ function Install-AgentFiles {
 
     New-Item -ItemType Directory -Force -Path $Dst | Out-Null
 
-    $files = @('monitor.js', 'supervisor.js', 'lib.js', 'package.json')
+    # --- single-file build (preferred): one exe, no runtime, no node_modules ---
+    if ($script:BundledExe) {
+        Copy-Item $script:BundledExe.FullName (Join-Path $Dst $script:BundledExe.Name) -Force
+        Ok "Bundled executable: $($script:BundledExe.Name)"
+
+        # Still shipped on disk: the PowerShell helpers the supervisor calls and
+        # the sql.js wasm (the browser-history monitor loads it at runtime).
+        foreach ($d in @('scripts')) {
+            $sp = Join-Path $Src $d
+            if (Test-Path $sp) {
+                $dp = Join-Path $Dst $d
+                if (Test-Path $dp) { Remove-Item $dp -Recurse -Force -ErrorAction SilentlyContinue }
+                Copy-Item $sp $dp -Recurse -Force
+            }
+        }
+        $wasm = Join-Path $Src 'node_modules\sql.js\dist\sql-wasm.wasm'
+        if (Test-Path $wasm) { Copy-Item $wasm (Join-Path $Dst 'sql-wasm.wasm') -Force }
+
+        # Drop leftovers from a previous Node-based install.
+        Remove-Item (Join-Path $Dst 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $Dst 'monitors') -Recurse -Force -ErrorAction SilentlyContinue
+        foreach ($f in @('monitor.js', 'supervisor.js', 'entry.js', 'lib.js')) {
+            Remove-Item (Join-Path $Dst $f) -Force -ErrorAction SilentlyContinue
+        }
+        return
+    }
+
+    # --- source install: needs Node.js + node_modules --------------------------
+    $files = @('monitor.js', 'supervisor.js', 'entry.js', 'lib.js', 'package.json')
     if (Test-Path (Join-Path $Src 'package-lock.json')) { $files += 'package-lock.json' }
 
     foreach ($f in $files) {
@@ -556,8 +596,14 @@ function Invoke-NpmInstall {
 function Get-AgentProcesses {
     $list = @()
     try {
-        $list = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'monitor\.js|supervisor\.js') })
+        $names = @('node.exe')
+        if ($script:BundledExe) { $names += $script:BundledExe.Name }
+        if ($InstallDir -and (Test-Path $InstallDir)) {
+            $names += @(Get-ChildItem -Path $InstallDir -Filter '*.exe' -File -ErrorAction SilentlyContinue | ForEach-Object Name)
+        }
+        $filter = (($names | Select-Object -Unique | ForEach-Object { "Name = '$_'" }) -join ' OR ')
+        $list = @(Get-CimInstance Win32_Process -Filter $filter |
+            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'monitor\.js|supervisor\.js|--monitor\b|--supervisor\b') })
     } catch { }
     return $list
 }
@@ -570,7 +616,7 @@ function Test-Deployment {
     if ($procs.Count -gt 0) {
         Ok "$($procs.Count) agent process(es) running"
         foreach ($p in $procs) {
-            $kind = if ($p.CommandLine -match 'supervisor\.js') { 'supervisor' } else { 'agent    ' }
+            $kind = if ($p.CommandLine -match 'supervisor\.js|--supervisor\b') { 'supervisor' } else { 'agent    ' }
             Say "        $kind  pid=$($p.ProcessId)  session=$($p.SessionId)"
         }
     } else {
@@ -609,6 +655,14 @@ function Show-Status {
         return
     }
     Say "  Install dir : $InstallDir"
+    $bundled = @(Get-ChildItem -Path $InstallDir -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($bundled) {
+        Say "  Runtime     : bundled executable ($($bundled[0].Name))"
+    } elseif (Test-Path (Join-Path $InstallDir 'node_modules')) {
+        Say '  Runtime     : Node.js + node_modules'
+    } else {
+        Say '  Runtime     : unknown'
+    }
     $cfg = Read-Json (Join-Path $InstallDir 'config.json')
     if ($cfg) {
         Say "  Server URL  : $($cfg.serverUrl)"
@@ -661,6 +715,16 @@ function Show-Status {
 if (-not $InstallDir) { $InstallDir = Join-Path $env:ProgramData 'EasyskillMonitor' }
 $SourceDir = Split-Path -Parent $PSCommandPath
 $SrcConfig = Join-Path $SourceDir 'config.json'
+
+# A prebuilt single-file executable (produced by tools/build.js) turns this into
+# a Node-free install: no runtime, no node_modules, nothing called node.exe on
+# the employee's machine. Source installs keep working when dist\ is absent.
+$BundledExe = $null
+$distDir = Join-Path $SourceDir 'dist'
+if (Test-Path $distDir) {
+    $BundledExe = Get-ChildItem -Path $distDir -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
 
 if ($Uninstall) {
     Assert-Admin
@@ -779,15 +843,21 @@ if (Test-Path (Join-Path $InstallDir 'config.json')) {
     Say ''
 }
 
-# --- 1. node ----------------------------------------------------------------
-Step 'Checking Node.js'
-$node = Find-Node
+# --- 1. runtime --------------------------------------------------------------
 $nodeExe = $null
-if ($node) {
-    $nodeExe = $node.Path
-    Ok "Found $($node.Version) -> $nodeExe"
+if ($BundledExe) {
+    Step 'Runtime'
+    Ok "Bundled executable ($($BundledExe.Name)) - Node.js not required"
+    $nodeExe = Join-Path $InstallDir $BundledExe.Name
 } else {
-    $nodeExe = Install-NodePortable -TargetDir $InstallDir
+    Step 'Checking Node.js'
+    $node = Find-Node
+    if ($node) {
+        $nodeExe = $node.Path
+        Ok "Found $($node.Version) -> $nodeExe"
+    } else {
+        $nodeExe = Install-NodePortable -TargetDir $InstallDir
+    }
 }
 
 # --- 2. config inputs -------------------------------------------------------
@@ -872,7 +942,11 @@ if ($freshPw) {
 }
 
 # --- 5. dependencies --------------------------------------------------------
-Invoke-NpmInstall -WorkDir $InstallDir -NodeExe $nodeExe
+if (-not $BundledExe) {
+    Invoke-NpmInstall -WorkDir $InstallDir -NodeExe $nodeExe
+} else {
+    Ok 'No npm dependencies - everything is inside the executable'
+}
 
 # --- 5b. permissions --------------------------------------------------------
 # Must run after npm install (npm needs to write) and before the agent starts.
@@ -892,8 +966,13 @@ try {
     Ok 'Supervisor task started'
 } catch {
     Warn "Start-ScheduledTask failed: $($_.Exception.Message) - falling back to direct launch"
-    Start-Process -FilePath $nodeExe -ArgumentList "`"$InstallDir\supervisor.js`"" `
-        -WorkingDirectory $InstallDir -WindowStyle Hidden
+    if ($BundledExe) {
+        Start-Process -FilePath $nodeExe -ArgumentList '--supervisor' `
+            -WorkingDirectory $InstallDir -WindowStyle Hidden
+    } else {
+        Start-Process -FilePath $nodeExe -ArgumentList "`"$InstallDir\supervisor.js`"" `
+            -WorkingDirectory $InstallDir -WindowStyle Hidden
+    }
 }
 
 Say '  Waiting a few seconds for the supervisor to reconcile sessions...'
@@ -909,10 +988,13 @@ Say "  Agent folder : $InstallDir"
 Say "  Dashboard    : $ServerUrl"
 Say "  Machine name : $env:COMPUTERNAME"
 Say ''
-Say '  Behaviour:'
-Say '   - runs at PC startup (before logon) and at every user logon'
-Say '   - hidden background process, no visible window'
-Say '   - restarts within 1 minute if it is killed or crashes'
+    Say '  Behaviour:'
+    Say '   - runs at PC startup (before logon) and at every user logon'
+    Say '   - hidden background process, no visible window'
+    if ($BundledExe) {
+        Say "   - single $($BundledExe.Name) process - no Node.js, no node_modules"
+    }
+    Say '   - restarts within 1 minute if it is killed or crashes'
 Say '   - resumes automatically after sleep/hibernate (StartWhenAvailable)'
 Say '   - streams activity to the dashboard every 10 s'
 Say '   - buffers offline - events queue to disk until the server is back'

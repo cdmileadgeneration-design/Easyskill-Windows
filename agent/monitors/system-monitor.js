@@ -55,7 +55,8 @@ class SystemMonitor {
       // Only report an unexpected shutdown if it happened recently, otherwise
       // every agent start would re-report a historic power-loss event.
       const { stdout } = await execAsync(
-        'wevtutil qe System /f:text /c:3 /rd:true /q:"Event[System[EventID=1074 or EventID=6006 or EventID=6008]]"'
+        'wevtutil qe System /f:text /c:3 /rd:true /q:"Event[System[EventID=1074 or EventID=6006 or EventID=6008]]"',
+        { windowsHide: true }
       );
 
       if (/6008/.test(stdout)) {
@@ -80,7 +81,8 @@ class SystemMonitor {
     this.processInterval = setInterval(async () => {
       try {
         const { stdout } = await execAsync(
-          'powershell -Command "Get-Process | Select-Object Name, Id, WorkingSet64, CPU | ConvertTo-Json"'
+          'powershell -Command "Get-Process | Select-Object Name, Id, WorkingSet64, CPU | ConvertTo-Json"',
+          { windowsHide: true }
         );
 
         const processes = JSON.parse(stdout);
@@ -105,7 +107,7 @@ class SystemMonitor {
     const interval = this.agent.config.networkPollInterval || 300000;
     this.networkInterval = setInterval(async () => {
       try {
-        const { stdout } = await execAsync('netstat -ano');
+        const { stdout } = await execAsync('netstat -ano', { windowsHide: true });
 
         const lines = stdout.split('\n');
         const connections = [];
@@ -150,7 +152,8 @@ class SystemMonitor {
     const checkSoftware = async () => {
       try {
         const { stdout } = await execAsync(
-          'powershell -Command "Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate | ConvertTo-Json"'
+          'powershell -Command "Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate | ConvertTo-Json"',
+          { windowsHide: true }
         );
 
         const software = JSON.parse(stdout);

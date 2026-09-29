@@ -2,12 +2,13 @@
   session-agent.ps1 - helper run by supervisor.js
 
   Actions:
-    -Action Enumerate
+    -Action Enumerate -NodeExe C:\...\node.exe | C:\...\agent.exe
         -> JSON: { selfSessionId, sessions:[{sessionId,user,domain,state}],
                    agents:[{pid,sessionId,commandLine}] }
 
     -Action Launch -SessionId 3 -NodeExe C:\...\node.exe
                   -Arguments "...monitor.js --user jane --profile C:\Users\jane"
+                             (bundled build: -Arguments "--monitor --user ...")
                   -WorkingDirectory C:\ProgramData\EasyskillMonitor
         -> starts the process INSIDE that session's desktop (WinSta0\Default)
            using the logged-on user's own token, so foreground-window polling,
@@ -48,9 +49,10 @@ public static class SessionAgent
     private const int SecurityImpersonation = 2;
 
     private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
-    private const uint CREATE_NEW_CONSOLE = 0x00000010;
     private const uint CREATE_NO_WINDOW = 0x08000000;
     private const uint CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
+    private const int STARTF_USESHOWWINDOW = 0x00000001;
+    private const short SW_HIDE = 0;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WTS_SESSION_INFO
@@ -197,12 +199,19 @@ public static class SessionAgent
         var si = new STARTUPINFO();
         si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
         si.lpDesktop = desktop;
+        // Never show a console on the employee's desktop. STARTF_USESHOWWINDOW
+        // + SW_HIDE is honoured even if the creation flags are ignored.
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
 
         var cmd = new System.Text.StringBuilder();
         cmd.Append('"').Append(exe).Append('"');
         if (!string.IsNullOrEmpty(args)) cmd.Append(' ').Append(args);
 
-        uint flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_NEW_CONSOLE;
+        // CREATE_NEW_CONSOLE and CREATE_NO_WINDOW are mutually exclusive: when
+        // both are passed Windows creates a VISIBLE console. Only
+        // CREATE_NO_WINDOW may be used here.
+        uint flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
         PROCESS_INFORMATION pi;
 
         // Service tasks are often hosted in a job object; break away when allowed.
@@ -242,11 +251,14 @@ try {
         $selfSession = 0
         if ($self) { $selfSession = $self.SessionId }
 
-        # node.exe processes running either the agent or the supervisor
+        # processes running either the agent or the supervisor: the supervisor
+        # passes its own executable (node.exe, or the bundled single-file exe)
+        # so the filter stays correct in both build modes.
+        $exeName = if ($NodeExe) { [System.IO.Path]::GetFileName($NodeExe) } else { 'node.exe' }
         $agents = @()
         try {
-            $agents = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-                Where-Object { $_.CommandLine -and ($_.CommandLine -match 'monitor\.js|supervisor\.js') } |
+            $agents = @(Get-CimInstance Win32_Process -Filter "Name = '$exeName'" |
+                Where-Object { $_.CommandLine -and ($_.CommandLine -match 'monitor\.js|supervisor\.js|--monitor\b|--supervisor\b') } |
                 ForEach-Object {
                     [pscustomobject]@{
                         pid         = $_.ProcessId

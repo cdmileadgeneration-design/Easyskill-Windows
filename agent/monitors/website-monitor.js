@@ -3,41 +3,77 @@ const path = require('path');
 const os = require('os');
 const initSqlJs = require('sql.js');
 
+// sql-wasm.wasm ships next to the executable in the bundled build (deploy.ps1
+// copies it into the install folder) and stays in node_modules when the agent
+// runs from source.
+const WASM_CANDIDATES = [
+  path.join(__dirname, 'sql-wasm.wasm'),
+  path.join(process.cwd(), 'sql-wasm.wasm'),
+  path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
+];
+
+function locateWasm(file) {
+  for (const p of WASM_CANDIDATES) {
+    try { if (fs.existsSync(p)) return p; } catch (e) { /* keep looking */ }
+  }
+  const missing = WASM_CANDIDATES.map(p => `\n  - ${p}`).join('');
+  throw new Error(`sql-wasm.wasm not found (reinstall the agent so it is copied next to the executable). Looked for:${missing}`);
+}
+
 class WebsiteMonitor {
   constructor(agent) {
     this.agent = agent;
     this.browsers = {
-      chrome: this.getChromeHistoryPath(),
-      edge: this.getEdgeHistoryPath(),
-      firefox: this.getFirefoxHistoryPath()
+      chrome: this.getChromeHistoryPaths(),
+      edge: this.getEdgeHistoryPaths(),
+      firefox: this.getFirefoxHistoryPaths()
     };
     this.lastChecked = {};
     this.checkInterval = null;
+    this.parseFailures = {};
   }
 
-  getChromeHistoryPath() {
+  // Chrome/Edge ship with a "Default" profile plus any number of "Profile N"
+  // profiles - watching only "Default" meant a machine with a named profile
+  // reported no websites at all.
+  profileHistoryPaths(userDataDir, profileFile) {
+    const out = [];
+    try {
+      if (!fs.existsSync(userDataDir)) return out;
+      for (const entry of fs.readdirSync(userDataDir)) {
+        if (entry !== 'Default' && !entry.startsWith('Profile ')) continue;
+        const dbPath = path.join(userDataDir, entry, profileFile);
+        try { if (fs.existsSync(dbPath)) out.push(dbPath); } catch (e) { /* skip */ }
+      }
+    } catch (e) { /* profile folder unreadable */ }
+    return out;
+  }
+
+  getChromeHistoryPaths() {
     const userData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    return path.join(userData, 'Google', 'Chrome', 'User Data', 'Default', 'History');
+    return this.profileHistoryPaths(path.join(userData, 'Google', 'Chrome', 'User Data'), 'History');
   }
 
-  getEdgeHistoryPath() {
+  getEdgeHistoryPaths() {
     const userData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    return path.join(userData, 'Microsoft', 'Edge', 'User Data', 'Default', 'History');
+    return this.profileHistoryPaths(path.join(userData, 'Microsoft', 'Edge', 'User Data'), 'History');
   }
 
-  getFirefoxHistoryPath() {
+  getFirefoxHistoryPaths() {
     const userData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
     const profiles = path.join(userData, 'Mozilla', 'Firefox', 'Profiles');
+    const out = [];
 
-    if (fs.existsSync(profiles)) {
-      const dirs = fs.readdirSync(profiles);
-      for (const dir of dirs) {
+    try {
+      if (!fs.existsSync(profiles)) return out;
+      for (const dir of fs.readdirSync(profiles)) {
         if (dir.endsWith('.default-release') || dir.endsWith('.default')) {
-          return path.join(profiles, dir, 'places.sqlite');
+          const dbPath = path.join(profiles, dir, 'places.sqlite');
+          if (fs.existsSync(dbPath)) out.push(dbPath);
         }
       }
-    }
-    return null;
+    } catch (e) { /* profile folder unreadable */ }
+    return out;
   }
 
   async start() {
@@ -52,12 +88,17 @@ class WebsiteMonitor {
   }
 
   async checkBrowsers() {
-    for (const [browser, dbPath] of Object.entries(this.browsers)) {
-      if (dbPath && fs.existsSync(dbPath)) {
+    for (const [browser, dbPaths] of Object.entries(this.browsers)) {
+      for (const dbPath of dbPaths) {
+        if (!dbPath || !fs.existsSync(dbPath)) continue;
         try {
           await this.parseBrowserHistory(browser, dbPath);
         } catch (e) {
-          // Browser might be locked - retried on the next tick
+          // Browser might be locked - retried on the next tick. Log the first
+          // failure and then every 50th so a permanently broken parse is
+          // visible in the agent log instead of silently losing websites.
+          const n = (this.parseFailures[browser] = (this.parseFailures[browser] || 0) + 1);
+          if (n === 1 || n % 50 === 0) this.agent.log(`WebsiteMonitor: ${browser} history read failed (${n}x): ${e.message}`);
         }
       }
     }
@@ -69,7 +110,7 @@ class WebsiteMonitor {
     try {
       fs.copyFileSync(dbPath, tempPath);
 
-      const SQL = await initSqlJs();
+      const SQL = await initSqlJs({ locateFile: locateWasm });
       const filebuffer = fs.readFileSync(tempPath);
       const db = new SQL.Database(filebuffer);
 
@@ -124,7 +165,9 @@ class WebsiteMonitor {
       this.lastChecked[browser] = Date.now();
       db.close();
     } catch (e) {
-      // Browser might be locked or the profile corrupted - never crash the agent
+      // Browser might be locked or the profile corrupted - never crash the
+      // agent, but let checkBrowsers() report it instead of staying silent.
+      throw e;
     } finally {
       try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
     }

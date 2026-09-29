@@ -38,8 +38,9 @@ class UsbMonitor {
   async getUsbStorageDevices() {
     try {
       const { stdout } = await execAsync(
-        'powershell -Command "Get-WmiObject Win32_USBControllerDevice | ForEach-Object { [wmi]($_.Dependent) } | Where-Object { $_.PNPClass -eq \'DiskDrive\' } | Select-Object Name, DeviceID, PNPDeviceID | ConvertTo-Json"'
-      );
+            'powershell -Command "Get-WmiObject Win32_USBControllerDevice | ForEach-Object { [wmi]($_.Dependent) } | Where-Object { $_.PNPClass -eq \'DiskDrive\' } | Select-Object Name, DeviceID, PNPDeviceID | ConvertTo-Json"',
+            { windowsHide: true }
+          );
       
       const devices = JSON.parse(stdout);
       return Array.isArray(devices) ? devices : [devices];

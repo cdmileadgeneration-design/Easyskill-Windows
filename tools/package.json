@@ -1,0 +1,14 @@
+{
+  "name": "easyskill-build-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Builds the agent into a single self-contained executable (Node SEA).",
+  "scripts": {
+    "build": "node build.js",
+    "build:clean": "node build.js --clean"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2",
+    "postject": "^1.0.0-alpha.6"
+  }
+}

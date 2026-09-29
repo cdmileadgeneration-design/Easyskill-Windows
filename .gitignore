@@ -11,6 +11,10 @@ node_modules/
 agent/agent.log
 agent/outbox.json
 
+# build artifacts (tools/build.js -> single-file agent)
+agent/.build/
+agent/dist/
+
 # logs / os noise
 *.log
 .DS_Store

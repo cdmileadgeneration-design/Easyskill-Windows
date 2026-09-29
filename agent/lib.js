@@ -6,6 +6,28 @@ const path = require('path');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 
+// ---------------------------------------------------------------------------
+// Build mode
+// ---------------------------------------------------------------------------
+// `__BUNDLED__` is replaced with `true` by esbuild when tools/build.js makes
+// the single-file executable; it stays an undeclared identifier when the agent
+// runs from source, so `typeof` keeps dev mode working without a global.
+const RUNNING_BUNDLED = typeof __BUNDLED__ !== 'undefined' && __BUNDLED__ === true;
+
+// Command line token that selects the monitor entry point. In the bundled build
+// entry.js dispatches on `--monitor`; from source the script path is used.
+function monitorTarget() {
+  return RUNNING_BUNDLED ? '--monitor' : path.join(__dirname, 'monitor.js');
+}
+
+// Command that re-runs this same program with extra arguments, so the keeper
+// task and the session launcher behave identically in both build modes.
+function selfCommand(extraArgs = []) {
+  const args = RUNNING_BUNDLED ? [...extraArgs] : [process.argv[1], ...extraArgs];
+  return { exe: process.execPath, args };
+}
+
+
 const DEFAULTS = {
   serverUrl: 'https://easyskill-windows.onrender.com',
   agentKey: 'monitoring-agent-secret-key',
@@ -100,6 +122,27 @@ function userTag(user) {
   return String(user).replace(/[^A-Za-z0-9_.\-]/g, '_').slice(0, 40) || 'default';
 }
 
+// Folder holding the PowerShell helpers (get-foreground-window.ps1, ...).
+// lib.js always sits next to them in source mode (agent\scripts) and shares the
+// executable's directory in the bundled build (esbuild flattens every module
+// into one file, so __dirname is the install folder where deploy.ps1 copies
+// scripts\). Resolving from here therefore works in BOTH build modes, unlike
+// monitors\*.js which would compute <installDir>\..\scripts and find nothing.
+const SCRIPTS_DIR = path.join(__dirname, 'scripts');
+
+function resolveScript(name) {
+  const candidates = [
+    path.join(SCRIPTS_DIR, name),
+    path.join(__dirname, 'scripts', name),
+    // legacy layout: monitors\*.js resolved relative to their own folder
+    path.join(__dirname, '..', 'scripts', name)
+  ];
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return candidate; } catch (e) { /* keep looking */ }
+  }
+  return null;
+}
+
 // Runtime folder the agent (running as the employee) is allowed to write.
 // Keeping it out of the install folder lets deploy.ps1 make everything else
 // read-only for the logged-in user, so they cannot delete or replace the
@@ -123,4 +166,4 @@ function appendLog(file, message, maxBytes = 2 * 1024 * 1024) {
   } catch (e) { /* never let logging kill the agent */ }
 }
 
-module.exports = { DEFAULTS, CONFIG_PATH, STATE_DIR, statePath, parseArgs, applyProfile, loadConfig, userTag, appendLog };
+module.exports = { DEFAULTS, CONFIG_PATH, STATE_DIR, SCRIPTS_DIR, resolveScript, statePath, parseArgs, applyProfile, loadConfig, userTag, appendLog, RUNNING_BUNDLED, monitorTarget, selfCommand };

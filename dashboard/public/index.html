@@ -39,6 +39,10 @@
         
         .timeline-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         
+        .timeline-notice { display: none; padding: 8px 15px; font-size: 12px; background: #2a2a2a; color: #f39c12; border-bottom: 1px solid #333; }
+        .timeline-notice.visible { display: block; }
+        .timeline-notice.error { color: #e74c3c; }
+
         .timeline-header { display: flex; background: #222; border-bottom: 1px solid #333; }
         .timeline-label-col { width: 140px; min-width: 140px; background: #222; border-right: 1px solid #333; }
         .timeline-hour-row { display: flex; flex: 1; }
@@ -182,6 +186,7 @@
                 <div class="timeline-label-col"></div>
                 <div class="timeline-hour-row" id="hourRow"></div>
             </div>
+            <div id="timelineNotice" class="timeline-notice"></div>
             <div id="lanes"></div>
         </div>
         
@@ -238,9 +243,9 @@
         const API = window.location.origin + '/api';
         const COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63','#00bcd4','#8bc34a','#ff5722','#607d8b','#795548','#cddc39','#009688','#673ab7'];
         const BROWSER_COLORS = { chrome: '#3498db', edge: '#2ecc71', firefox: '#e67e22' };
-        const FILE_COLORS = { create: '#2ecc71', delete: '#e74c3c', modify: '#f39c12', access: '#3498db' };
+        const FILE_COLORS = { create: '#2ecc71', delete: '#e74c3c', modify: '#f39c12', open: '#3498db', access: '#9b59b6' };
         const USB_COLORS = { connect: '#2ecc71', disconnect: '#e74c3c' };
-        const SYSTEM_COLORS = { idle: '#f39c12', active: '#2ecc71', shutdown: '#e74c3c' };
+        const SYSTEM_COLORS = { idle: '#f39c12', active: '#2ecc71', shutdown: '#e74c3c', start: '#3498db', other: '#9b59b6' };
         const appColors = {};
         let currentView = 'timeline';
         let currentMachine = '';
@@ -260,6 +265,77 @@
             return appColors[name];
         }
 
+        // The date picker works in the viewer's local time while every event is
+        // stored as a UTC ISO timestamp, so the selected day has to be converted
+        // to a UTC window - otherwise the first hours of the day (and everything
+        // after midnight on UTC-negative clocks) never come back from the API.
+        function localDateStr(d) {
+            const dt = d || new Date();
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }
+
+        function parseDateStr(value) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+            if (!m) return new Date();
+            return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        }
+
+        function localDayRange(dateStr) {
+            const day = parseDateStr(dateStr);
+            return {
+                startDate: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0).toISOString(),
+                endDate: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999).toISOString()
+            };
+        }
+
+        function showNotice(message, isError) {
+            const el = document.getElementById('timelineNotice');
+            if (!message) { el.classList.remove('visible', 'error'); el.textContent = ''; return; }
+            el.textContent = message;
+            el.classList.toggle('error', Boolean(isError));
+            el.classList.add('visible');
+        }
+
+        // One failed endpoint used to reject the whole Promise.all and leave a
+        // blank timeline with no explanation. Fetch every lane independently so
+        // the rest of the day still renders.
+        async function fetchList(endpoint, params) {
+            try {
+                const data = await api(endpoint, params);
+                if (Array.isArray(data)) return data;
+                showNotice(`Unexpected response from ${endpoint}`, true);
+                return [];
+            } catch (e) {
+                if (e && e.sessionExpired) throw e;
+                console.error(`loadTimeline ${endpoint} failed:`, e);
+                showNotice(`Failed to load ${endpoint.replace('/stats/', '')}: ${e.message}`, true);
+                return [];
+            }
+        }
+
+        async function fetchSummary(params) {
+            try {
+                const data = await api('/dashboard/summary', params);
+                return data && typeof data === 'object' ? data : null;
+            } catch (e) {
+                if (e && e.sessionExpired) throw e;
+                console.error('loadTimeline summary failed:', e);
+                showNotice(`Failed to load summary: ${e.message}`, true);
+                return null;
+            }
+        }
+
+        function systemEventStyle(entry) {
+            switch (entry.event_type) {
+                case 'idle_start': return { color: SYSTEM_COLORS.idle, label: 'Idle Started' };
+                case 'idle_end': return { color: SYSTEM_COLORS.active, label: 'Active Again' };
+                case 'system_start': return { color: SYSTEM_COLORS.start, label: 'Agent Started' };
+                case 'system_shutdown': return { color: SYSTEM_COLORS.shutdown, label: 'Agent Stopped' };
+                case 'unexpected_shutdown': return { color: SYSTEM_COLORS.shutdown, label: 'Unexpected Shutdown' };
+                default: return { color: SYSTEM_COLORS.other, label: entry.event_type || 'Event' };
+            }
+        }
+
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
@@ -270,7 +346,7 @@
                     document.getElementById('loginPage').style.display = 'none';
                     document.getElementById('dashboardPage').classList.add('active');
                     document.getElementById('currentUser').textContent = d.user.username;
-                    document.getElementById('timelineDate').value = new Date().toISOString().split('T')[0];
+                    document.getElementById('timelineDate').value = localDateStr();
                     await loadMachines();
                     loadTimeline();
                 } else { alert(d.error || 'Invalid credentials'); }
@@ -281,8 +357,11 @@
             const url = new URL(`${API}${endpoint}`);
             Object.entries(params).forEach(([k,v])=>{ if(v !== undefined && v !== null && v !== '') url.searchParams.append(k,v); });
             const r = await fetch(url, { headers:{'Authorization':`Bearer ${token}`} });
-            if (r.status === 401) { logout(); throw new Error('Session expired'); }
-            return r.json();
+            if (r.status === 401) { logout(); const err = new Error('Session expired'); err.sessionExpired = true; throw err; }
+            let data = null;
+            try { data = await r.json(); } catch (e) { data = null; }
+            if (!r.ok) throw new Error((data && data.error) || `HTTP ${r.status}`);
+            return data;
         }
 
         async function loadMachines() {
@@ -353,42 +432,42 @@
         }
 
         async function loadTimeline() {
-            const date = document.getElementById('timelineDate').value;
-            const params = { 
-                startDate: date+'T00:00:00', 
-                endDate: date+'T23:59:59',
-                machine_name: currentMachine
-            };
+            const dateInput = document.getElementById('timelineDate');
+            if (!dateInput.value) dateInput.value = localDateStr();
+            const date = dateInput.value;
+            const day = localDayRange(date);
+            const params = { startDate: day.startDate, endDate: day.endDate, machine_name: currentMachine };
+            const scope = currentMachine ? ` on ${currentMachine}` : '';
 
-            const [appData, fileData, websiteData, usbData, systemData, summary] = await Promise.all([
-                api('/stats/applications/raw', params),
-                api('/stats/files', params),
-                api('/stats/websites/raw', params),
-                api('/stats/usb/raw', params),
-                api('/stats/events/raw', params),
-                api('/dashboard/summary', { date, machine_name: currentMachine })
-            ]);
-            
-            const apps = [...new Set(appData.map(e => e.process_name))];
+            showNotice('');
+
+            let appData = [], fileData = [], websiteData = [], usbData = [], systemData = [], summary = null;
+            try {
+                [appData, fileData, websiteData, usbData, systemData, summary] = await Promise.all([
+                    fetchList('/stats/applications/raw', params),
+                    fetchList('/stats/files', params),
+                    fetchList('/stats/websites/raw', params),
+                    fetchList('/stats/usb/raw', params),
+                    fetchList('/stats/events/raw', params),
+                    fetchSummary({ date, startDate: day.startDate, endDate: day.endDate, machine_name: currentMachine })
+                ]);
+            } catch (e) {
+                return; // session expired - api() already logged the user out
+            }
+
+            const apps = [...new Set(appData.map(e => e.process_name))].filter(Boolean);
             apps.forEach(a => getAppColor(a));
             
             const legend = document.getElementById('appLegend');
             legend.innerHTML = apps.slice(0, 20).map(a => `<div class="legend-item"><div class="legend-color" style="background:${appColors[a]}"></div>${esc(a)}</div>`).join('');
-            
-            if (summary.applications) {
-                document.getElementById('sumApps').textContent = summary.applications.unique_apps || 0;
-                document.getElementById('sumActive').textContent = formatDur(summary.applications.total_active_time || 0);
-            }
-            if (summary.websites) {
-                document.getElementById('sumSites').textContent = summary.websites.unique_sites || 0;
-            }
-            if (summary.files) {
-                const totalFiles = (summary.files.files_created || 0) + (summary.files.files_deleted || 0) + (summary.files.files_modified || 0);
-                document.getElementById('sumFiles').textContent = totalFiles;
-            }
-            if (summary.usb) {
-                document.getElementById('sumUsb').textContent = summary.usb.total_events || 0;
-            }
+
+            const files = (summary && summary.files) || {};
+            document.getElementById('sumApps').textContent = summary && summary.applications ? summary.applications.unique_apps || 0 : 0;
+            document.getElementById('sumActive').textContent = summary && summary.applications ? formatDur(summary.applications.total_active_time || 0) : '0:00';
+            document.getElementById('sumSites').textContent = summary && summary.websites ? summary.websites.unique_sites || 0 : 0;
+            document.getElementById('sumFiles').textContent =
+                (files.files_created || 0) + (files.files_deleted || 0) + (files.files_modified || 0) + (files.files_open || 0);
+            document.getElementById('sumUsb').textContent = summary && summary.usb ? summary.usb.total_events || 0 : 0;
             
             const hourRow = document.getElementById('hourRow');
             hourRow.innerHTML = '';
@@ -407,6 +486,11 @@
             buildWebsiteLane(lanesDiv, 'Websites', websiteData);
             buildUsbLane(lanesDiv, 'USB', usbData);
             buildSystemLane(lanesDiv, 'System', systemData);
+
+            const activityEvents = appData.length + fileData.length + websiteData.length + usbData.length;
+            if (activityEvents === 0 && !document.getElementById('timelineNotice').classList.contains('visible')) {
+                showNotice(`No application, document or website activity recorded${scope} on ${date}. Make sure the agent on that machine is running and sending events.`, false);
+            }
             
             const tbody = document.getElementById('detailBody');
             const sorted = [...appData].sort((a,b) => new Date(b.start_time) - new Date(a.start_time));
@@ -445,8 +529,9 @@
             const systemBody = document.getElementById('systemBody');
             const sortedSystem = [...systemData].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
             systemBody.innerHTML = sortedSystem.slice(0, 100).map(e => {
+                const style = systemEventStyle(e);
                 const time = new Date(e.timestamp);
-                return `<tr><td><span class="color-dot" style="background:#666"></span></td><td>${esc(e.event_type)}</td><td>${esc(e.event_data || '')}</td><td>${time.toLocaleTimeString()}</td></tr>`;
+                return `<tr><td><span class="color-dot" style="background:${style.color}"></span></td><td>${esc(style.label)}</td><td>${esc(e.event_data || '')}</td><td>${time.toLocaleTimeString()}</td></tr>`;
             }).join('');
         }
 
@@ -637,22 +722,20 @@
             for (let h = 0; h < 24; h++) { const l = document.createElement('div'); l.className = 'lane-grid-line'; grid.appendChild(l); }
             content.appendChild(grid);
             
-            const idleEvents = data.filter(e => e.event_type === 'idle_start' || e.event_type === 'idle_end');
-            idleEvents.forEach(entry => {
+            data.forEach(entry => {
                 const ts = new Date(entry.timestamp);
                 const min = ts.getHours() * 60 + ts.getMinutes();
                 const left = (min / 1440) * 100;
-                const isIdle = entry.event_type === 'idle_start';
-                const color = isIdle ? SYSTEM_COLORS.idle : SYSTEM_COLORS.active;
+                const style = systemEventStyle(entry);
                 
                 const marker = document.createElement('div');
                 marker.className = 'event-marker';
                 marker.style.left = left + '%';
-                marker.style.backgroundColor = color;
+                marker.style.backgroundColor = style.color;
                 
                 marker.addEventListener('mouseenter', (e) => {
                     const tt = document.getElementById('tooltip');
-                    tt.innerHTML = `<div class="tt-app" style="color:${color}">${isIdle ? 'Idle Started' : 'Active Again'}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
+                    tt.innerHTML = `<div class="tt-app" style="color:${style.color}">${esc(style.label)}</div><div class="tt-doc">${esc(entry.event_data || '')}</div><div class="tt-time">${ts.toLocaleTimeString()}</div>`;
                     tt.style.display = 'block';
                     tt.style.left = (e.clientX + 15) + 'px';
                     tt.style.top = (e.clientY - 10) + 'px';
@@ -669,9 +752,17 @@
         }
 
         async function loadScreenshots() {
-            const params = { machine_name: currentMachine };
-            const data = await api('/screenshots', params);
             const grid = document.getElementById('ssGrid');
+            let data = [];
+            try {
+                const res = await api('/screenshots', { machine_name: currentMachine });
+                if (Array.isArray(res)) data = res;
+            } catch (e) {
+                if (e && e.sessionExpired) return;
+                console.error('loadScreenshots failed:', e);
+                grid.innerHTML = `<div class="ss-empty">Failed to load screenshots: ${esc(e.message)}</div>`;
+                return;
+            }
             if (!data.length) { grid.innerHTML = '<div class="ss-empty">No screenshots yet. Click the Screenshot button to capture one.</div>'; return; }
             grid.innerHTML = data.map(s => `<div class="ss-card" onclick="viewScreenshot(${s.id})"><div id="ssimg-${s.id}" style="height:200px;background:#333;display:flex;align-items:center;justify-content:center;color:#666;">Loading...</div><div class="ss-info"><div class="ss-time">${new Date(s.timestamp).toLocaleString()}</div><div class="ss-reason">${esc(s.reason)}</div><div class="ss-machine">${esc(s.machine_name || 'Local')}</div></div></div>`).join('');
             data.forEach(s => loadSSImage(s.id));
@@ -728,14 +819,16 @@
 
         function changeDate(delta) {
             const input = document.getElementById('timelineDate');
-            const d = new Date(input.value);
+            // Build the new day in local time - going through toISOString() here
+            // shifted the day by one on UTC-negative clocks.
+            const d = parseDateStr(input.value);
             d.setDate(d.getDate() + delta);
-            input.value = d.toISOString().split('T')[0];
+            input.value = localDateStr(d);
             if (currentView === 'timeline') loadTimeline();
         }
 
         function goToday() {
-            document.getElementById('timelineDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('timelineDate').value = localDateStr();
             if (currentView === 'timeline') loadTimeline();
         }
 

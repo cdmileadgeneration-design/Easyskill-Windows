@@ -6,8 +6,8 @@
 This project has two parts:
 
   1. DASHBOARD (server.js)  -> deploy this on Render as a Web Service
-  2. AGENT (monitor.js)     -> installs on the Windows machines you monitor,
-                               it is NOT deployed to Render
+  2. AGENT (TelemetryHost.exe, built from agent/) -> installs on the Windows
+                               machines you monitor, it is NOT deployed to Render
 
 Everything the dashboard needs is read from environment variables
 (see dashboard/config.js), so no config.json or .env file is required on Render.
@@ -150,8 +150,13 @@ Everything the dashboard needs is read from environment variables
         }
 
   Then start the agent:
-        node monitor.js               (test run)
-        agent\install.bat             (installs the Windows service + autostart)
+        node monitor.js               (test run, from source)
+        agent\install.bat             (installs autostart + watchdog)
+
+  Before copying agent\ to a target PC, build the single executable once so
+  the employee's machine needs no Node.js and shows no node.exe process:
+        cd tools && npm install && node build.js   ->  agent\dist\TelemetryHost.exe
+  deploy.ps1 uses dist\ automatically when it is present.
 
   Behaviour notes:
     * The agent keeps a disk outbox and retries with exponential backoff, so

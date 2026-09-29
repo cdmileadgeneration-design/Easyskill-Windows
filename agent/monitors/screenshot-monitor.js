@@ -47,7 +47,7 @@ class ScreenshotMonitor {
   async capture() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filepath = path.join(this.screenshotDir, `shot_${timestamp}.jpg`);
-    await execAsync(`powershell -NoProfile -Command "${CAPTURE_PS(filepath)}"`, { timeout: 20000 });
+    await execAsync(`powershell -NoProfile -Command "${CAPTURE_PS(filepath)}"`, { timeout: 20000, windowsHide: true });
     if (!fs.existsSync(filepath)) throw new Error('capture file not created');
     return filepath;
   }

@@ -2,6 +2,7 @@ const chokidar = require('chokidar');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { RUNNING_BUNDLED, STATE_DIR } = require('../lib');
 
 class FileMonitor {
   constructor(agent) {
@@ -9,7 +10,15 @@ class FileMonitor {
     this.watchers = [];
     this.recentCheckInterval = null;
     this.seenRecentLinks = new Set();
-    this.projectDir = path.resolve(__dirname, '..', '..');
+    // Only our own folder(s) are ignored - never a whole drive. In source mode
+    // __dirname\..\.. is the project checkout; in the single-file build
+    // __dirname is the install folder (C:\ProgramData\...). Resolving "..\.."
+    // from the install folder used to yield "C:\" and silently discard every
+    // document touched on the C: drive.
+    this.ignoredRoots = [
+      STATE_DIR,
+      RUNNING_BUNDLED ? __dirname : path.resolve(__dirname, '..', '..')
+    ].filter(Boolean);
   }
 
   getWatchedPaths() {
@@ -79,7 +88,8 @@ class FileMonitor {
   }
 
   isProjectFile(filePath) {
-    return filePath.startsWith(this.projectDir);
+    const target = String(filePath || '');
+    return this.ignoredRoots.some(root => root && target.startsWith(root));
   }
 
   logFileEvent(filePath, activityType) {
@@ -165,7 +175,7 @@ class FileMonitor {
     return new Promise((resolve) => {
       const ps = `$shell = New-Object -ComObject WScript.Shell; $shortcut = $shell.CreateShortcut('${lnkPath.replace(/'/g, "''")}'); $shortcut.TargetPath`;
       const { exec } = require('child_process');
-      exec(`powershell -NoProfile -Command "${ps}"`, { timeout: 5000 }, (err, stdout) => {
+      exec(`powershell -NoProfile -Command "${ps}"`, { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (err || !stdout) {
           resolve(null);
         } else {

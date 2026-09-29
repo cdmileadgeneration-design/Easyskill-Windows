@@ -227,8 +227,8 @@ app.get('/api/stats/network', apiLimiter, authenticate, h(async (req, res) => {
 }));
 
 app.get('/api/dashboard/summary', apiLimiter, authenticate, h(async (req, res) => {
-  const { date, machine_name } = req.query;
-  res.json(await db.summary({ date, machineName: machine_name }));
+  const { date, startDate, endDate, machine_name } = req.query;
+  res.json(await db.summary({ date, startDate, endDate, machineName: machine_name }));
 }));
 
 // ---------------------------------------------------------------------------

@@ -43,11 +43,13 @@ copy .env.example .env
 copy config.example.json config.json
 cd dashboard && npm install && cd ..
 cd agent    && npm install && cd ..
+cd tools    && npm install && cd ..    # build tooling, only for the single-file exe
 ```
 Then edit `.env` and `config.json` (see section 2).
 
 ### Requirements
-- **Node.js 18+** (https://nodejs.org LTS) — `node -v` to verify
+- **Node.js 18+** (https://nodejs.org LTS) — `node -v` to verify (your dev
+  machine only; a target PC with `agent\dist\` needs none of this)
 - Internet for `npm install` and for MongoDB/Cloudinary access
 
 ---
@@ -134,16 +136,54 @@ node dashboard/check-db.js                                  // inspect sqlite sc
 
 ---
 
+## 3b. Build the single-file agent executable (recommended)
+
+Turns the agent into **one Windows executable**, so the employee's machine gets
+no Node.js runtime, no `node_modules\` and no process named `node.exe`:
+
+```bat
+cd tools
+npm install
+node build.js
+```
+
+Output: `agent\dist\TelemetryHost.exe` (~88 MB - most of it *is* the embedded
+Node.js runtime).
+
+- `deploy.ps1` picks it up automatically from `dist\` and skips the Node/npm
+  path completely. Delete `dist\` to fall back to a source install.
+- Rename what shows up in Task Manager with `set EASYSKILL_EXE_NAME=YourName.exe`
+  before building. Keep it bland and **never** copy a real Windows system
+  binary name - that trips antivirus and is a bad idea anyway.
+- The SEA fuse sentinel is read out of `node.exe` at build time, so rebuilding
+  after a Node upgrade does not need a script change.
+- Rebuild whenever anything under `agent\` changes.
+
+Next to the exe the installer also ships `scripts\*.ps1` (session launcher),
+`sql-wasm.wasm` (browser history reader), `config.json` and `state\`.
+
+Not hideable: a running process still appears in Task Manager - only a kernel
+driver could change that and it would look like malware. There is no window,
+no tray icon and no installer UI.
+
+---
+
 ## 4. Install the agent on a target PC
 
 **One script does everything:** `agent\deploy.ps1`
 
-1. Copy the **`agent` folder** to the target PC.
-2. Make sure **Node.js 18+** is installed there (`node -v`). No Node? The
-   installer downloads a portable copy to `%ProgramData%` by itself.
+1. Build the single-file executable once on your dev machine:
+   `node tools\build.js` → `agent\dist\TelemetryHost.exe`
+   (skip this only if you want a plain Node.js install instead).
+2. Copy the **`agent` folder** (including `dist\`) to the target PC.
 3. Right-click **`agent\install.bat`** → **Run as administrator**
    (it just launches `deploy.ps1` with UAC). It asks you to set an
    **uninstall password** - write it down, it is needed to remove the agent.
+
+The target PC needs **no Node.js, no npm and no internet to install** when
+`dist\` is present - the installer just copies one executable. Without `dist\`
+it falls back to Node.js: install Node 18+ there, or let the script download a
+portable copy to `%ProgramData%` by itself.
 
 Or from an elevated prompt, with optional flags:
 
@@ -168,7 +208,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -SetUninsta
 
 What `deploy.ps1` does:
 - copies files to `%ProgramData%\EasyskillMonitor` and writes `config.json` (no BOM)
-- `npm install` if dependencies are missing
+- with `dist\` present: installs the single executable (no runtime, no
+  `node_modules`, no process called `node.exe` on the employee's machine);
+  otherwise `npm install` if dependencies are missing
 - **locks the install folder down**: the logged-in employee gets read+execute
   only on everything except `state\`, so they cannot create, overwrite or
   delete any agent file (details below)
@@ -350,12 +392,13 @@ The project is already written for it:
 setup.bat                                 :: first-time setup / reinstall deps
 cd dashboard && npm start                 :: run dashboard locally
 node dashboard/set-password.js admin "X"  :: change admin password
+cd tools && node build.js                 :: rebuild agent\dist\TelemetryHost.exe
 
 :: ---- target PC (Admin) ----
 agent\install.bat                         :: install / update agent (deploy.ps1)
 agent\uninstall.bat                       :: remove agent + tasks
 powershell -File agent\deploy.ps1 -Status :: agent health / task state
-node monitor.js                           :: run agent in foreground (test)
+node monitor.js                           :: run agent from source (test)
 
 :: ---- git ----
 git add -A

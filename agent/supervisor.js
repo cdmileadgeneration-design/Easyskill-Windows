@@ -15,8 +15,9 @@
  * is the only requirement, so the install works on a clean Windows image.
  *
  * Run modes:
- *   node supervisor.js            long-running watchdog loop
- *   node supervisor.js --once     keeper task: relaunches the watchdog if it
+ *   node supervisor.js / <exe> --supervisor    long-running watchdog loop
+ *   node supervisor.js --once / <exe> --supervisor --once
+ *                                 keeper task: relaunches the watchdog if it
  *                                 is gone, then exits (never reconciles itself)
  */
 const fs = require('fs');
@@ -26,13 +27,12 @@ const http = require('http');
 const https = require('https');
 const { spawn, execFile } = require('child_process');
 
-const { loadConfig, userTag, appendLog, parseArgs } = require('./lib');
+const { loadConfig, userTag, appendLog, parseArgs, monitorTarget, selfCommand } = require('./lib');
 
 const AGENT_VERSION = require('./package.json').version;
 const SUPERVISOR_VERSION = '1.0.0';
 
 const PS_PATH = path.join(__dirname, 'scripts', 'session-agent.ps1');
-const MONITOR_JS = path.join(__dirname, 'monitor.js');
 const LOG_FILE = path.join(__dirname, 'supervisor.log');
 const STATUS_FILE = path.join(__dirname, 'supervisor-status.json');
 const LOCK_FILE = path.join(__dirname, 'supervisor.lock');
@@ -113,7 +113,7 @@ function powershell(script, params, timeoutMs = 20000) {
 }
 
 async function enumerate() {
-  const raw = await powershell(PS_PATH, ['-Action', 'Enumerate']);
+  const raw = await powershell(PS_PATH, ['-Action', 'Enumerate', '-NodeExe', process.execPath]);
   return JSON.parse(raw);
 }
 
@@ -125,7 +125,7 @@ async function launchAgent(session) {
 
   const profile = session.profile || '';
   const a = [];
-  a.push('"', MONITOR_JS, '"');
+  a.push('"', monitorTarget(), '"');
   if (profile) a.push(' --profile "', profile, '"');
   a.push(' --user "', session.user, '"');
   a.push(' --session "', String(session.sessionId), '"');
@@ -189,7 +189,7 @@ async function reconcile() {
 
   // adopt agents we didn't launch (e.g. supervisor restarted)
   for (const a of snap.agents || []) {
-    if (!a.commandLine || a.commandLine.indexOf('monitor.js') < 0) continue;
+    if (!a.commandLine || !/monitor\.js|--monitor\b/.test(a.commandLine)) continue;
     const key = `${a.sessionId}:${a.pid}`;
     if (!workers.has(key)) {
       workers.set(key, {
@@ -359,7 +359,8 @@ async function sendHeartbeat() {
 // killed process).
 function spawnSupervisor() {
   try {
-    const child = spawn(process.execPath, [__filename], {
+    const cmd = selfCommand(['--supervisor']);
+    const child = spawn(cmd.exe, cmd.args, {
       cwd: __dirname,
       detached: true,
       stdio: 'ignore',

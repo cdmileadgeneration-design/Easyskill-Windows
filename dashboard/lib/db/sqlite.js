@@ -267,7 +267,7 @@ function create(cfg, shared) {
       return select({
         columns: 'file_path, activity_type, timestamp, user_name, machine_name',
         table: 'file_activities', filter,
-        extra: 'ORDER BY timestamp DESC LIMIT 1000'
+        extra: 'ORDER BY timestamp DESC LIMIT 20000'
       });
     },
 
@@ -324,11 +324,13 @@ function create(cfg, shared) {
       });
     },
 
-    async summary({ date, machineName } = {}) {
+    async summary({ date, startDate, endDate, machineName } = {}) {
       const filter = { dateField: null, machineName };
       const w = filterSql(filter);
       const day = (column) => ` AND ${column} >= ? AND ${column} < ?`;
-      const range = shared.dayRange(date);
+      // `startDate`/`endDate` (the UTC window of the selected local day) win
+      // over the legacy single-date form so cards match the timeline lanes.
+      const range = (startDate && endDate) ? [startDate, endDate] : shared.dayRange(date);
 
       const appUsage = queryOne(
         `SELECT COUNT(DISTINCT process_name) as unique_apps, COALESCE(SUM(duration),0) as total_active_time FROM application_usage WHERE 1=1${day('start_time')}${w.sql}`,
@@ -339,7 +341,7 @@ function create(cfg, shared) {
         [...range, ...w.params]
       );
       const fileActivities = queryOne(
-        `SELECT SUM(CASE WHEN activity_type='create' THEN 1 ELSE 0 END) as files_created, SUM(CASE WHEN activity_type='delete' THEN 1 ELSE 0 END) as files_deleted, SUM(CASE WHEN activity_type='modify' THEN 1 ELSE 0 END) as files_modified FROM file_activities WHERE 1=1${day('timestamp')}${w.sql}`,
+        `SELECT SUM(CASE WHEN activity_type='create' THEN 1 ELSE 0 END) as files_created, SUM(CASE WHEN activity_type='delete' THEN 1 ELSE 0 END) as files_deleted, SUM(CASE WHEN activity_type='modify' THEN 1 ELSE 0 END) as files_modified, SUM(CASE WHEN activity_type='open' THEN 1 ELSE 0 END) as files_open FROM file_activities WHERE 1=1${day('timestamp')}${w.sql}`,
         [...range, ...w.params]
       );
       const usbEvents = queryOne(
@@ -356,7 +358,7 @@ function create(cfg, shared) {
       );
 
       return {
-        date: range[0],
+        date: String(range[0]).slice(0, 10),
         machine: machineName || 'all',
         applications: appUsage,
         websites: websiteVisits,

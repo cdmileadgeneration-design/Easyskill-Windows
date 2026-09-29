@@ -147,7 +147,7 @@ function create(cfg, shared) {
         dateField: 'timestamp', startDate, endDate, user, machineName,
         where: activityType ? [{ field: 'activity_type', value: activityType }] : []
       });
-      const docs = await col('file_activities').find(match).sort({ timestamp: -1 }).limit(1000).toArray();
+      const docs = await col('file_activities').find(match).sort({ timestamp: -1 }).limit(20000).toArray();
       return docs.map(mapDoc);
     },
 
@@ -186,44 +186,54 @@ function create(cfg, shared) {
       return docs.map(mapDoc);
     },
 
-    async summary({ date, machineName } = {}) {
+    async summary({ date, startDate, endDate, machineName } = {}) {
+      // The dashboard sends the exact UTC window of the selected local day so
+      // the summary cards always agree with the lanes; `date` alone remains the
+      // fallback for older clients (treated as a UTC calendar day).
+      const [rangeStart, rangeEnd] = (startDate && endDate) ? [startDate, endDate] : shared.dayRange(date);
+      const dayMatch = (field) => {
+        const range = { [field]: { $gte: rangeStart, $lt: rangeEnd } };
+        const machine = shared.machineMatchMongo(machineName);
+        return machine ? { $and: [range, machine] } : range;
+      };
+
       const apps = await col('application_usage').aggregate([
-        { $match: dayMatch('start_time', date, machineName) },
+        { $match: dayMatch('start_time') },
         { $group: { _id: null, unique: { $addToSet: '$process_name' }, total: { $sum: { $ifNull: ['$duration', 0] } } } }
       ]).toArray();
       const sites = await col('website_visits').aggregate([
-        { $match: dayMatch('visit_time', date, machineName) },
+        { $match: dayMatch('visit_time') },
         { $group: { _id: null, unique: { $addToSet: '$url' }, total: { $sum: 1 } } }
       ]).toArray();
       const files = await col('file_activities').aggregate([
-        { $match: dayMatch('timestamp', date, machineName) },
+        { $match: dayMatch('timestamp') },
         {
           $group: {
             _id: null,
             files_created: { $sum: { $cond: [{ $eq: ['$activity_type', 'create'] }, 1, 0] } },
             files_deleted: { $sum: { $cond: [{ $eq: ['$activity_type', 'delete'] }, 1, 0] } },
-            files_modified: { $sum: { $cond: [{ $eq: ['$activity_type', 'modify'] }, 1, 0] } }
+            files_modified: { $sum: { $cond: [{ $eq: ['$activity_type', 'modify'] }, 1, 0] } },
+            files_open: { $sum: { $cond: [{ $eq: ['$activity_type', 'open'] }, 1, 0] } }
           }
         }
       ]).toArray();
-      const usb = await col('usb_devices').countDocuments(dayMatch('timestamp', date, machineName));
-      const [dayStart, dayEnd] = shared.dayRange(date);
-      const shotRange = { timestamp: { $gte: dayStart, $lt: dayEnd } };
+      const usb = await col('usb_devices').countDocuments(dayMatch('timestamp'));
+      const shotRange = { timestamp: { $gte: rangeStart, $lt: rangeEnd } };
       const shots = await col('screenshots').countDocuments(
         machineName ? { $and: [shotRange, { machine_name: machineName }] } : shotRange
       );
       const idle = await col('system_events').countDocuments({
-        $and: [dayMatch('timestamp', date, machineName), { event_type: 'idle_start' }]
+        $and: [dayMatch('timestamp'), { event_type: 'idle_start' }]
       });
 
       return {
-        date: shared.dayRange(date)[0],
+        date: rangeStart.slice(0, 10),
         machine: machineName || 'all',
         applications: apps.length ? { unique_apps: apps[0].unique.length, total_active_time: apps[0].total } : { unique_apps: 0, total_active_time: 0 },
         websites: sites.length ? { unique_sites: sites[0].unique.length, total_visits: sites[0].total } : { unique_sites: 0, total_visits: 0 },
         files: files.length
-          ? { files_created: files[0].files_created, files_deleted: files[0].files_deleted, files_modified: files[0].files_modified }
-          : { files_created: 0, files_deleted: 0, files_modified: 0 },
+          ? { files_created: files[0].files_created, files_deleted: files[0].files_deleted, files_modified: files[0].files_modified, files_open: files[0].files_open }
+          : { files_created: 0, files_deleted: 0, files_modified: 0, files_open: 0 },
         usb: { total_events: usb },
         screenshots: { total_screenshots: shots },
         idle: { idle_events: idle }
