@@ -142,7 +142,8 @@ node dashboard/check-db.js                                  // inspect sqlite sc
 2. Make sure **Node.js 18+** is installed there (`node -v`). No Node? The
    installer downloads a portable copy to `%ProgramData%` by itself.
 3. Right-click **`agent\install.bat`** → **Run as administrator**
-   (it just launches `deploy.ps1` with UAC).
+   (it just launches `deploy.ps1` with UAC). It asks you to set an
+   **uninstall password** - write it down, it is needed to remove the agent.
 
 Or from an elevated prompt, with optional flags:
 
@@ -155,13 +156,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 `
     -ServerUrl https://easyskill-windows.onrender.com `
     -AgentKey <same as server AGENT_KEY> -DisableScreenshots
 
-# non-interactive (no prompts) - good for RMM / bulk rollout
-powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -NonInteractive
+# non-interactive (no prompts) - good for RMM / bulk rollout.
+# -SetUninstallPassword is required here; without it a random one is
+# generated and printed once at the end of the output.
+powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -NonInteractive `
+    -SetUninstallPassword 'your-kept-secret'
+
+# change the uninstall password on an already-installed PC
+powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -SetUninstallPassword 'new-secret'
 ```
 
 What `deploy.ps1` does:
 - copies files to `%ProgramData%\EasyskillMonitor` and writes `config.json` (no BOM)
 - `npm install` if dependencies are missing
+- **locks the install folder down**: the logged-in employee gets read+execute
+  only on everything except `state\`, so they cannot create, overwrite or
+  delete any agent file (details below)
 - registers two scheduled tasks under `\Easyskill\`:
   - **AgentSupervisor** - runs at boot *and* at every logon, restarts on
     failure (999 retries, 1 min apart), never times out
@@ -176,6 +186,23 @@ session 0 and cannot read another user's Chrome history, clipboard or the
 foreground window. The SYSTEM task only acts as a supervisor; the actual
 collector is launched into the interactive session via `CreateProcessAsUser`.
 
+**Folder permissions (tamper resistance)**
+
+| Path | Owner / rights |
+|---|---|
+| `%ProgramData%\EasyskillMonitor` and everything in it | SYSTEM + Administrators: full. **Users: read + execute only** (no create, no write, no delete) |
+| `%ProgramData%\EasyskillMonitor\state\` | Users: **modify** - the only place the agent writes (logs, event outbox) |
+
+Inheritance is disabled, so a file the employee drops anywhere else in the
+folder is impossible, and `CREATOR OWNER` cannot hand them control of files
+the agent creates. `deploy.ps1` also runs `takeown` first: files written by
+the SYSTEM supervisor are owned by SYSTEM and would otherwise be
+un-editable by the installer.
+
+Killing the agent only buys a few seconds - the supervisor relaunches it
+within 10 s and the keeper within 60 s. A user can always terminate their
+own process (a Windows rule no installer can override), but it comes back.
+
 Quick test without installing anything:
 ```bat
 cd agent
@@ -187,10 +214,10 @@ node monitor.js
 powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -Status
 ```
 ```
-C:\ProgramData\EasyskillMonitor\supervisor.log  → supervisor started
-C:\ProgramData\EasyskillMonitor\agent-<user>.log → All monitors started
-                                                    Delivered N events
-dashboard                                         → GET /api/agents lists the machine
+C:\ProgramData\EasyskillMonitor\supervisor.log         → supervisor started
+C:\ProgramData\EasyskillMonitor\state\agent-<user>.log → All monitors started
+                                                         Delivered N events
+dashboard                                              → GET /api/agents lists the machine
 ```
 
 **Update an already-installed agent** (after changing the URL/key):
@@ -200,10 +227,19 @@ agent\install.bat
 :: or by hand: edit %ProgramData%\EasyskillMonitor\config.json
 :: then: powershell -ExecutionPolicy Bypass -File agent\deploy.ps1 -Status
 ```
+Re-running the installer keeps the existing uninstall password; pass
+`-SetUninstallPassword` only if you want to change it.
 
-**Uninstall:** `agent\uninstall.bat` (Run as administrator), or
+**Uninstall (password-protected):** `agent\uninstall.bat` (Run as
+administrator), or
 `powershell -ExecutionPolicy Bypass -File agent\deploy.ps1 -Uninstall`
-(stops the processes, removes both tasks and the install folder).
+- prompts for the uninstall password (mask the input; only a salted
+  SHA-256 hash of it is stored, in `config.json` → `security`)
+- refuses without it: `-NonInteractive` with no `-UninstallPassword`, or a
+  wrong password, exits with code 1 and removes nothing
+- stops the processes, removes both tasks and the install folder
+- if a password was ever set, `-Force` will *not* bypass it - delete
+  `config.json` first if it is genuinely lost (that needs admin anyway)
 
 > Agent features: application usage, website visits, file activity, USB events,
 > processes, network connections, system/idle events, screenshots (encrypted

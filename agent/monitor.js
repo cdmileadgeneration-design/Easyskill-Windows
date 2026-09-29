@@ -5,7 +5,7 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 
-const { parseArgs, applyProfile, loadConfig, userTag, appendLog } = require('./lib');
+const { parseArgs, applyProfile, loadConfig, userTag, appendLog, statePath } = require('./lib');
 
 const AGENT_VERSION = '2.2.0';
 
@@ -29,19 +29,17 @@ class MonitoringAgent extends EventEmitter {
     this.heartbeatTimer = null;
 
     // Set up file destinations first: loadConfig() may log during a parse
-    // failure, so logFile/outboxPath must already be defined.
+    // failure, so logFile/outboxPath must already be defined. Both live in the
+    // user-writable state folder, never in the read-only install folder.
     this.userName = cliArgs.user || os.userInfo().username || '';
     const tag = userTag(this.userName);
-    this.outboxPath = path.join(
-      __dirname,
-      `outbox-${tag}.json`
-    );
-    this.logFile = path.join(__dirname, `agent-${tag}.log`);
+    this.outboxPath = statePath(`outbox-${tag}.json`);
+    this.logFile = statePath(`agent-${tag}.log`);
     this.sessionId = cliArgs.session || '';
 
     this.config = loadConfig((m) => this.log(m));
     if (this.config.outboxFile) {
-      this.outboxPath = path.join(__dirname, this.config.outboxFile);
+      this.outboxPath = statePath(this.config.outboxFile);
     }
   }
 

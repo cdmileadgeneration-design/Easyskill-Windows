@@ -100,6 +100,17 @@ function userTag(user) {
   return String(user).replace(/[^A-Za-z0-9_.\-]/g, '_').slice(0, 40) || 'default';
 }
 
+// Runtime folder the agent (running as the employee) is allowed to write.
+// Keeping it out of the install folder lets deploy.ps1 make everything else
+// read-only for the logged-in user, so they cannot delete or replace the
+// agent while still being able to produce logs and queue events.
+const STATE_DIR = path.join(__dirname, 'state');
+
+function statePath(name) {
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch (e) {}
+  return path.join(STATE_DIR, name);
+}
+
 // Append to a log file, rotating it once it passes `maxBytes` so a long-lived
 // install never fills the disk.
 function appendLog(file, message, maxBytes = 2 * 1024 * 1024) {
@@ -112,4 +123,4 @@ function appendLog(file, message, maxBytes = 2 * 1024 * 1024) {
   } catch (e) { /* never let logging kill the agent */ }
 }
 
-module.exports = { DEFAULTS, CONFIG_PATH, parseArgs, applyProfile, loadConfig, userTag, appendLog };
+module.exports = { DEFAULTS, CONFIG_PATH, STATE_DIR, statePath, parseArgs, applyProfile, loadConfig, userTag, appendLog };

@@ -10,6 +10,8 @@ echo  This will:
 echo   - Install the agent to %%ProgramData%%\EasyskillMonitor
 echo   - Register boot + logon startup (survives reboot)
 echo   - Register a watchdog that restarts it if it is killed
+echo   - Lock the folder so the logged-in user cannot remove it
+echo   - Ask you to set an uninstall password (keep it safe!)
 echo   - Start it now and verify it is reporting
 echo.
 
