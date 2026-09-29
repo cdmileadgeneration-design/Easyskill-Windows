@@ -1,18 +1,17 @@
 {
   "name": "monitoring-agent",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Windows employee monitoring agent - collects activity and streams it to the dashboard",
   "main": "monitor.js",
   "scripts": {
     "start": "node monitor.js",
     "dev": "nodemon monitor.js",
-    "install-service": "node install-service.js --install",
-    "uninstall-service": "node install-service.js --uninstall",
-    "service-status": "node install-service.js --status"
+    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File deploy.ps1",
+    "status": "powershell -NoProfile -ExecutionPolicy Bypass -File deploy.ps1 -Status",
+    "uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File deploy.ps1 -Uninstall"
   },
   "dependencies": {
     "chokidar": "^3.5.3",
-    "node-windows": "^0.1.14",
     "sql.js": "^1.9.0"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "serverUrl": "http://localhost:3000",
+  "serverUrl": "https://easyskill-windows.onrender.com",
   "agentKey": "e67279936040e5f781500265df6338e427e0a323d7c29d01",
   "machineName": "",
   "sendInterval": 10000,

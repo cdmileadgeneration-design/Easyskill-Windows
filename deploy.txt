@@ -1,0 +1,286 @@
+================================================================================
+ RENDER.COM DEPLOYMENT GUIDE
+ Windows Monitoring Dashboard (Node.js + MongoDB + Cloudinary)
+================================================================================
+
+This project has two parts:
+
+  1. DASHBOARD (server.js)  -> deploy this on Render as a Web Service
+  2. AGENT (monitor.js)     -> installs on the Windows machines you monitor,
+                               it is NOT deployed to Render
+
+Everything the dashboard needs is read from environment variables
+(see dashboard/config.js), so no config.json or .env file is required on Render.
+
+
+--------------------------------------------------------------------------------
+ 1. PREREQUISITES (once, before you start)
+--------------------------------------------------------------------------------
+
+  1.1 MongoDB
+      - You already have an Atlas cluster. Copy the connection string.
+      - Atlas -> Network Access -> Add IP Address -> 0.0.0.0/0
+        (Render uses dynamic IPs; on a paid plan you can pin Render's static IPs)
+      - Atlas -> Database Access -> make sure the DB user can read/write.
+      - Recommended DB name: windows_monitoring  (or set MONGODB_DB yourself)
+
+  1.2 Cloudinary (screenshot file storage)
+      - dashboard -> Settings -> API Keys -> copy:
+          Cloud name, API key, API secret
+      - Cloudinary is REQUIRED on Render. The local disk on Render is
+        ephemeral (wiped on every deploy/restart), so STORAGE_PROVIDER=local
+        would lose screenshots.
+
+      Alternative: Amazon S3 -> set STORAGE_PROVIDER=s3 + S3_* / AWS_* vars.
+
+  1.3 Secrets to generate (use strong random values):
+      - JWT_SECRET   : open https://www.uuidgenerator.net/ or run: openssl rand -hex 48
+      - AGENT_KEY    : any long random string, e.g. openssl rand -hex 24
+        IMPORTANT: this value must be identical to security.agentKey in
+        agent/config.json, otherwise every agent will be rejected (401).
+
+  1.4 GitHub
+      - Your repo: https://github.com/cdmileadgeneration-design/Easyskill-Windows
+      - Render will connect to this repo.
+
+
+--------------------------------------------------------------------------------
+ 2. CREATE THE SERVICE ON RENDER
+--------------------------------------------------------------------------------
+
+  2.1 Log in to https://dashboard.render.com
+      -> New -> Web Service
+
+  2.2 Connect your GitHub repo (cdmileadgeneration-design/Easyskill-Windows).
+      If the repo is private, authorize Render's GitHub app.
+
+  2.3 Service settings:
+
+        Name                  : windows-monitoring-dashboard   (any name)
+        Region                : pick the region closest to your MongoDB Atlas region
+        Branch                : main
+        Root Directory        : dashboard          <-- IMPORTANT (the server lives here)
+        Runtime               : Node
+        Build Command         : npm install
+        Start Command         : node server.js
+        Instance Type         : Free (testing) / Starter (production)
+
+  2.4 Health Check Path     : /api/health
+      (Render restarts the instance if this endpoint stops answering)
+
+  2.5 Auto-Deploy           : ON (deploys every push to main)
+
+
+--------------------------------------------------------------------------------
+ 3. ENVIRONMENT VARIABLES (Dashboard -> Environment tab)
+--------------------------------------------------------------------------------
+
+  Copy/paste these and fill in the values:
+
+  --- Required ---------------------------------------------------------------
+  DB_PROVIDER          = mongodb
+  MONGODB_URI          = mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/?appName=windows-monitoring
+  MONGODB_DB           = windows_monitoring
+
+  STORAGE_PROVIDER     = cloudinary
+  CLOUDINARY_CLOUD_NAME= your-cloud-name
+  CLOUDINARY_API_KEY   = your-api-key
+  CLOUDINARY_API_SECRET= your-api-secret
+  CLOUDINARY_FOLDER    = windows-monitoring/screenshots
+
+  JWT_SECRET           = <long random string>
+  AGENT_KEY            = <same value as agent/config.json security.agentKey>
+
+  ADMIN_USER           = admin
+  ADMIN_PASSWORD       = <strong password>          (change the default!)
+  # or, better, store only a hash:
+  # ADMIN_PASSWORD_HASH = $2a$12$.... (bcrypt hash created by: node dashboard/set-password.js admin "YourPass")
+
+  --- Optional (defaults shown) ---------------------------------------------
+  HOST                 = 0.0.0.0
+  # PORT is set automatically by Render - do NOT hardcode it.
+  DATA_RETENTION_DAYS  = 90
+  SESSION_TIMEOUT      = 86400000
+
+  --- Only if STORAGE_PROVIDER=s3 -------------------------------------------
+  AWS_ACCESS_KEY_ID    =
+  AWS_SECRET_ACCESS_KEY=
+  AWS_REGION           = us-east-1
+  S3_BUCKET            =
+  S3_PREFIX            = screenshots/
+
+  Notes:
+    * config.json is OPTIONAL on Render. config.js falls back to these
+      environment variables, and only prints a warning if config.json is absent.
+    * Never commit real secrets - .env and config.json are git-ignored on purpose.
+      On Render, secrets live only in the Environment tab.
+
+
+--------------------------------------------------------------------------------
+ 4. DEPLOY
+--------------------------------------------------------------------------------
+
+  4.1 Click "Create Web Service" -> Render runs:  npm install  then  node server.js
+  4.2 Watch the Logs tab. A successful boot looks like:
+
+        [DB] MongoDB connected (windows_monitoring)
+        [Dashboard] Datastore: mongodb | Storage: cloudinary
+        [Dashboard] Server running on http://0.0.0.0:10000
+        [Dashboard] Login: admin / <hashed>
+
+  4.3 Open https://<your-service>.onrender.com and log in.
+
+  4.4 Smoke test:
+        GET  https://<your-service>.onrender.com/api/health
+             -> {"status":"ok","db":"mongodb","storage":"cloudinary"}
+        POST https://<your-service>.onrender.com/api/auth/login
+             body: {"username":"admin","password":"<ADMIN_PASSWORD>"}
+
+
+--------------------------------------------------------------------------------
+ 5. POINT THE WINDOWS AGENTS AT RENDER
+--------------------------------------------------------------------------------
+
+  On every monitored PC, edit agent/config.json (or re-run agent\install.bat):
+
+        {
+          "serverUrl": "https://<your-service>.onrender.com",
+          "agentKey" : "<same value as the AGENT_KEY env var>",
+          ...
+        }
+
+  Then start the agent:
+        node monitor.js               (test run)
+        agent\install.bat             (installs the Windows service + autostart)
+
+  Behaviour notes:
+    * The agent keeps a disk outbox and retries with exponential backoff, so
+      Render's free-tier sleep (cold start ~30-60s) does not lose data - the
+      first request after idle is just slow.
+    * Batches are de-duplicated on the server (ingest_batches), so a retry can
+      never insert the same events twice.
+    * Heartbeats appear under /api/agents once the agent connects.
+
+
+--------------------------------------------------------------------------------
+ 6. RENDER BLUEPRINT (optional render.yaml at the repo root)
+--------------------------------------------------------------------------------
+
+  Instead of clicking through the UI you can commit this file as render.yaml
+  and use "New -> Blueprint":
+
+        services:
+          - type: web
+            name: windows-monitoring-dashboard
+            runtime: node
+            region: oregon
+            rootDir: dashboard
+            buildCommand: npm install
+            startCommand: node server.js
+            healthCheckPath: /api/health
+            envVars:
+              - key: NODE_VERSION
+                value: 22
+              - key: DB_PROVIDER
+                value: mongodb
+              - key: MONGODB_URI
+                sync: false          # paste the value in the Render UI
+              - key: MONGODB_DB
+                value: windows_monitoring
+              - key: STORAGE_PROVIDER
+                value: cloudinary
+              - key: CLOUDINARY_CLOUD_NAME
+                sync: false
+              - key: CLOUDINARY_API_KEY
+                sync: false
+              - key: CLOUDINARY_API_SECRET
+                generateValue: true
+              - key: JWT_SECRET
+                generateValue: true
+              - key: AGENT_KEY
+                generateValue: true
+              - key: ADMIN_USER
+                value: admin
+              - key: ADMIN_PASSWORD
+                generateValue: true
+
+
+--------------------------------------------------------------------------------
+ 7. THINGS THAT ARE DIFFERENT ON RENDER (read this)
+--------------------------------------------------------------------------------
+
+  * Disk is ephemeral
+      - database/monitor.db and screenshots/ are wiped on every deploy/restart.
+      - That is why the defaults on Render are DB_PROVIDER=mongodb and
+        STORAGE_PROVIDER=cloudinary. Do not use DB_PROVIDER=sqlite on Render.
+
+  * Free tier sleeps
+      - The first request after ~15 min idle takes 30-60s (cold start).
+      - Keep-alive options: an external cron hitting /api/health, or a paid instance.
+
+  * Single instance recommended
+      - Login/API rate limits and the session bucket are in-memory, so they are
+        per instance. One instance keeps agent rate limits accurate.
+
+  * Config precedence (dashboard/config.js)
+        process env (.env)  >  config.json  >  built-in defaults
+      On Render only the first layer exists.
+
+  * Changing secrets later
+      - Environment tab -> edit -> "Save" (Render restarts the service).
+      - To rotate the admin password without env vars run locally:
+            node dashboard/set-password.js admin "NewStrongPass"
+        and set ADMIN_PASSWORD_HASH in Render instead of ADMIN_PASSWORD.
+
+  * Logs & audit trail
+      - Console output goes to the Render Logs tab.
+      - Privileged actions (login, agent rejections, purge, cleanup) are stored
+        in MongoDB collection "audit_log" when DB_PROVIDER=mongodb, and exposed
+        at GET /api/audit.
+
+  * Data retention
+      - Rows older than DATA_RETENTION_DAYS (default 90) are purged hourly;
+        old screenshot blobs are deleted from Cloudinary/S3 at the same time.
+
+
+--------------------------------------------------------------------------------
+ 8. TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+  "Failed to start: ... MONGODB_URI is empty"
+      -> DB_PROVIDER is mongodb but the MONGODB_URI variable is missing/empty.
+
+  "Server selection timed out" / Atlas connection error
+      -> Atlas Network Access does not allow Render IPs (add 0.0.0.0/0),
+         or the DB user/password in MONGODB_URI is wrong.
+
+  "[Storage] cloudinary is selected but its credentials are incomplete"
+      -> CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET not all set.
+         The server still boots but falls back to local disk (not persistent!).
+
+  Agent gets 401 "authentication rejected - check agentKey matches the server"
+      -> AGENT_KEY env var on Render != security.agentKey in agent/config.json.
+
+  Screenshots return 404 "File not found"
+      -> Blob missing in Cloudinary/S3 (or retention deleted it).
+         Check CLOUDINARY_* values and the screenshot timestamp.
+
+  Login always fails
+      -> ADMIN_PASSWORD / ADMIN_PASSWORD_HASH / ADMIN_USER mismatch.
+         Set ADMIN_USER + ADMIN_PASSWORD in Render and restart.
+
+  Blank dashboard, no data
+      -> Confirm agents are online: GET /api/agents (with a bearer token),
+         and check the agent log agent/agent.log on the monitored PC.
+
+================================================================================
+ Quick checklist
+   [ ] Atlas allows 0.0.0.0/0 and MONGODB_URI works
+   [ ] Cloudinary keys copied
+   [ ] Web Service root directory = dashboard, start = node server.js
+   [ ] All env vars from section 3 set (no hardcoded PORT)
+   [ ] Health check /api/health returns "ok"
+   [ ] ADMIN_PASSWORD changed from admin
+   [ ] agent/config.json serverUrl = Render URL, agentKey = AGENT_KEY
+   [ ] Screenshot visible in the dashboard
+================================================================================

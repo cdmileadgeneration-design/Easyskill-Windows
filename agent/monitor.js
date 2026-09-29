@@ -5,53 +5,48 @@ const os = require('os');
 const http = require('http');
 const https = require('https');
 
-const AGENT_VERSION = '2.1.0';
+const { parseArgs, applyProfile, loadConfig, userTag, appendLog } = require('./lib');
+
+const AGENT_VERSION = '2.2.0';
+
+// Session context flags (--profile/--user/--session) must be applied before any
+// monitor reads os.homedir() / process.env.LOCALAPPDATA, otherwise a supervisor
+// launching us from Session 0 would pollute the SYSTEM profile instead of the
+// logged-in employee's.
+const cliArgs = parseArgs(process.argv.slice(2));
+applyProfile(cliArgs.profile, cliArgs.user, cliArgs.session);
 
 class MonitoringAgent extends EventEmitter {
   constructor() {
     super();
     this.monitors = {};
     this.isRunning = false;
-    this.config = this.loadConfig();
     this.eventBuffer = [];
     this.currentBatch = null;
     this.sending = false;
     this.consecutiveFailures = 0;
     this.flushTimer = null;
     this.heartbeatTimer = null;
-    this.outboxPath = path.join(__dirname, this.config.outboxFile || 'outbox.json');
-    this.logFile = path.join(__dirname, 'agent.log');
-  }
 
-  loadConfig() {
-    const configPath = path.join(__dirname, 'config.json');
-    const defaults = {
-      serverUrl: 'http://localhost:3000',
-      agentKey: 'monitoring-agent-secret-key',
-      machineName: os.hostname(),
-      sendInterval: 10000,
-      batchSize: 50,
-      maxQueue: 50000,
-      screenshotInterval: 300000,
-      idleThreshold: 300000,
-      enableScreenshots: true,
-      enableKeystrokeTracking: false,
-      outboxFile: 'outbox.json'
-    };
-    try {
-      if (fs.existsSync(configPath)) {
-        const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        return { ...defaults, ...raw, machineName: raw.machineName || defaults.machineName };
-      }
-    } catch (e) {
-      this.log('Config load error: ' + e.message);
+    // Set up file destinations first: loadConfig() may log during a parse
+    // failure, so logFile/outboxPath must already be defined.
+    this.userName = cliArgs.user || os.userInfo().username || '';
+    const tag = userTag(this.userName);
+    this.outboxPath = path.join(
+      __dirname,
+      `outbox-${tag}.json`
+    );
+    this.logFile = path.join(__dirname, `agent-${tag}.log`);
+    this.sessionId = cliArgs.session || '';
+
+    this.config = loadConfig((m) => this.log(m));
+    if (this.config.outboxFile) {
+      this.outboxPath = path.join(__dirname, this.config.outboxFile);
     }
-    return defaults;
   }
 
   log(message) {
-    const line = `[${new Date().toISOString()}] ${message}\n`;
-    try { fs.appendFileSync(this.logFile, line); } catch (e) {}
+    appendLog(this.logFile, message);
     console.log(`[Agent] ${message}`);
   }
 
@@ -225,6 +220,7 @@ class MonitoringAgent extends EventEmitter {
     this.log(`Starting agent v${AGENT_VERSION}`);
     this.log(`Machine: ${this.config.machineName}`);
     this.log(`Server:  ${this.config.serverUrl}`);
+    this.log(`User:    ${this.userName} (session ${this.sessionId || 'n/a'})`);
 
     this.loadOutbox();
     this.isRunning = true;
