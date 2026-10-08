@@ -74,7 +74,7 @@ Then edit `.env` and `config.json` (see section 2).
 | `AGENT_KEY` | ⚠️ | Overrides `config.json` `security.agentKey` | must match agent |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | — | Dashboard login | `admin` / `admin` (change it!) |
 | `ADMIN_PASSWORD_HASH` | — | bcrypt hash instead of plaintext | `$2a$12$…` |
-| `DATA_RETENTION_DAYS` | — | Purge old rows after N days | `90` |
+| `DATA_RETENTION_DAYS` | — | Purge old rows after N days | `15` |
 | `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `AWS_*` | only for S3 | AWS storage | |
 
 > `.env` and `config.json` are **git-ignored** — never commit real secrets.
@@ -91,7 +91,7 @@ Then edit `.env` and `config.json` (see section 2).
     "adminPassword": "admin",       // or adminPasswordHash
     "sessionTimeout": 86400000
   },
-  "monitoring": { "dataRetentionDays": 90 },
+  "monitoring": { "dataRetentionDays": 15 },
   "database":  { "provider": "mongodb", "dbName": "windows_monitoring" },
   "storage":   { "provider": "cloudinary" }
 }

@@ -99,7 +99,7 @@ Everything the dashboard needs is read from environment variables
   --- Optional (defaults shown) ---------------------------------------------
   HOST                 = 0.0.0.0
   # PORT is set automatically by Render - do NOT hardcode it.
-  DATA_RETENTION_DAYS  = 90
+  DATA_RETENTION_DAYS  = 15
   SESSION_TIMEOUT      = 86400000
 
   --- Only if STORAGE_PROVIDER=s3 -------------------------------------------
@@ -244,7 +244,7 @@ Everything the dashboard needs is read from environment variables
         at GET /api/audit.
 
   * Data retention
-      - Rows older than DATA_RETENTION_DAYS (default 90) are purged hourly;
+      - Rows older than DATA_RETENTION_DAYS (default 15) are purged hourly;
         old screenshot blobs are deleted from Cloudinary/S3 at the same time.
 
 

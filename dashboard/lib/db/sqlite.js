@@ -348,9 +348,10 @@ function create(cfg, shared) {
         `SELECT COUNT(*) as total_events FROM usb_devices WHERE 1=1${day('timestamp')}${w.sql}`,
         [...range, ...w.params]
       );
+      const shotFilter = shared.machineClauseSql(machineName, 'machine_name');
       const screenshots = queryOne(
-        `SELECT COUNT(*) as total_screenshots FROM screenshots WHERE 1=1${day('timestamp')}${machineName ? ' AND machine_name = ?' : ''}`,
-        machineName ? [...range, machineName] : [...range]
+        `SELECT COUNT(*) as total_screenshots FROM screenshots WHERE 1=1${day('timestamp')}${shotFilter.sql}`,
+        [...range, ...shotFilter.params]
       );
       const idle = queryOne(
         `SELECT COUNT(*) as idle_events FROM system_events WHERE 1=1${day('timestamp')} AND event_type = 'idle_start'${w.sql}`,

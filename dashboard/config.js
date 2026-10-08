@@ -117,7 +117,7 @@ module.exports = {
   },
 
   monitoring: {
-    dataRetentionDays: int('DATA_RETENTION_DAYS', file.monitoring?.dataRetentionDays || 90)
+    dataRetentionDays: int('DATA_RETENTION_DAYS', file.monitoring?.dataRetentionDays || 15)
   },
 
   database: {

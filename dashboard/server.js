@@ -318,8 +318,8 @@ async function screenshotResponse(req, res, asImage) {
 }
 
 app.get('/api/screenshots', apiLimiter, authenticate, h(async (req, res) => {
-  const { startDate, endDate, reason, machine_name } = req.query;
-  res.json(await db.listScreenshots({ startDate, endDate, reason, machineName: machine_name }));
+  const { startDate, endDate, reason, machine_name, limit } = req.query;
+  res.json(await db.listScreenshots({ startDate, endDate, reason, machineName: machine_name, limit }));
 }));
 
 app.get('/api/screenshots/base64/:id', h((req, res) => screenshotResponse(req, res, false)));

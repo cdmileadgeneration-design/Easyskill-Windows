@@ -15,16 +15,26 @@ function escapeRegex(value) {
 
 // "machine_name" or, for legacy rows, user_name stored as "HOSTNAME\user".
 // Passing column === 'machine_name' restricts the match to an exact comparison.
+// Hostnames are case-insensitive on Windows, so every machine match compares
+// case-insensitively - otherwise a PC whose agent reports "desktop-abc" is
+// listed in the dropdown but returns zero rows when selected.
 function machineClauseSql(machineName, column = 'user_name') {
   if (!machineName) return { sql: '', params: [] };
-  if (column === 'machine_name') return { sql: ' AND machine_name = ?', params: [machineName] };
-  return { sql: ` AND (machine_name = ? OR ${column} LIKE ?)`, params: [machineName, `${machineName}\\%`] };
+  if (column === 'machine_name') return { sql: ' AND machine_name = ? COLLATE NOCASE', params: [machineName] };
+  return { sql: ` AND (machine_name = ? COLLATE NOCASE OR ${column} LIKE ?)`, params: [machineName, `${machineName}\\%`] };
 }
 
 function machineMatchMongo(machineName, column = 'user_name') {
   if (!machineName) return null;
-  if (column === 'machine_name') return { machine_name: machineName };
-  return { $or: [{ machine_name: machineName }, { [column]: new RegExp(`^${escapeRegex(machineName)}\\\\`) }] };
+  const exact = { $regex: `^${escapeRegex(machineName)}$`, $options: 'i' };
+  if (column === 'machine_name') return { machine_name: exact };
+  return {
+    $or: [
+      { machine_name: exact },
+      { [column]: { $regex: `^${escapeRegex(machineName)}\\\\`, $options: 'i' } },
+      { hostname: exact }
+    ]
+  };
 }
 
 // Neutral date-range representation translated by each backend.

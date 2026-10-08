@@ -219,8 +219,9 @@ function create(cfg, shared) {
       ]).toArray();
       const usb = await col('usb_devices').countDocuments(dayMatch('timestamp'));
       const shotRange = { timestamp: { $gte: rangeStart, $lt: rangeEnd } };
+      const shotMatch = shared.machineMatchMongo(machineName, 'machine_name');
       const shots = await col('screenshots').countDocuments(
-        machineName ? { $and: [shotRange, { machine_name: machineName }] } : shotRange
+        shotMatch ? { $and: [shotRange, shotMatch] } : shotRange
       );
       const idle = await col('system_events').countDocuments({
         $and: [dayMatch('timestamp'), { event_type: 'idle_start' }]
