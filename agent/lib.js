@@ -29,7 +29,7 @@ function selfCommand(extraArgs = []) {
 
 
 const DEFAULTS = {
-  serverUrl: 'https://easyskill-windows-fy9f.onrender.com',
+  serverUrl: 'http://3.111.38.240/',
   agentKey: 'monitoring-agent-secret-key',
   machineName: '',
   sendInterval: 10000,

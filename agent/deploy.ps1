@@ -867,7 +867,7 @@ if (-not $ServerUrl -or -not $AgentKey) {
     if (-not $ServerUrl) {
         $ServerUrl = if ($dstCfg -and $dstCfg.serverUrl) { $dstCfg.serverUrl }
                      elseif ($srcCfg -and $srcCfg.serverUrl) { $srcCfg.serverUrl }
-                     else { 'https://easyskill-windows-fy9f.onrender.com' }
+                     else { 'http://3.111.38.240/' }
     }
     if (-not $AgentKey) {
         $AgentKey = if ($dstCfg -and $dstCfg.agentKey) { $dstCfg.agentKey }
