@@ -102,7 +102,7 @@ Then edit `.env` and `config.json` (see section 2).
 ```jsonc
 {
   "serverUrl": "https://easyskill-windows-fy9f.onrender.com",  // dashboard URL
-  "agentKey":  "e67279936040e5f781500265df6338e427e0a323d7c29d01", // must match server AGENT_KEY
+  "agentKey":  "6138abd7e31445f9e92c04a55087517fc1869699d2128b04b78cd18381506545", // must match server AGENT_KEY
   "machineName": "",
   "sendInterval": 10000,
   "screenshotInterval": 300000,
@@ -307,7 +307,7 @@ Full detail with the exact screen fields is in **`deploy.txt`**. Short version:
    CLOUDINARY_API_KEY=...
    CLOUDINARY_API_SECRET=...
    JWT_SECRET=<random>
-   AGENT_KEY=e67279936040e5f781500265df6338e427e0a323d7c29d01
+   AGENT_KEY=6138abd7e31445f9e92c04a55087517fc1869699d2128b04b78cd18381506545
    ADMIN_USER=admin
    ADMIN_PASSWORD=<strong>
    ```

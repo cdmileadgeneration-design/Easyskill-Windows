@@ -9,7 +9,7 @@
   },
   "security": {
     "jwtSecret": "change-this-to-secure-random-string",
-    "agentKey": "e67279936040e5f781500265df6338e427e0a323d7c29d01",
+    "agentKey": "6138abd7e31445f9e92c04a55087517fc1869699d2128b04b78cd18381506545",
     "adminUser": "admin",
     "adminPassword": "admin",
     "adminPasswordHash": "",

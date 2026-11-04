@@ -30,7 +30,7 @@ function selfCommand(extraArgs = []) {
 
 const DEFAULTS = {
   serverUrl: 'http://3.111.38.240/',
-  agentKey: 'monitoring-agent-secret-key',
+  agentKey: '6138abd7e31445f9e92c04a55087517fc1869699d2128b04b78cd18381506545',
   machineName: '',
   sendInterval: 10000,
   batchSize: 50,

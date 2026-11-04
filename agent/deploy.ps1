@@ -889,6 +889,10 @@ if (-not $AgentKey) {
     Fail 'No agent key provided. Pass -AgentKey "..." or edit agent\config.json first.'
     exit 1
 }
+# Strip trailing slashes so "$ServerUrl/api/health" never becomes "//api/health"
+# (Express answers 404 for a double slash and the check falsely reports the
+# dashboard as unreachable).
+$ServerUrl = "$ServerUrl".TrimEnd('/')
 
 # --- 2b. uninstall password -------------------------------------------------
 # The employee must not be able to remove the agent. Only a salted SHA-256
