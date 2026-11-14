@@ -101,11 +101,11 @@ Then edit `.env` and `config.json` (see section 2).
 
 ```jsonc
 {
-  "serverUrl": "https://easyskill-windows-fy9f.onrender.com",  // dashboard URL
+  "serverUrl": "http://3.111.38.240",  // dashboard URL
   "agentKey":  "6138abd7e31445f9e92c04a55087517fc1869699d2128b04b78cd18381506545", // must match server AGENT_KEY
   "machineName": "",
   "sendInterval": 10000,
-  "screenshotInterval": 300000,
+  "screenshotInterval": 120000,
   "enableScreenshots": true
 }
 ```
@@ -177,7 +177,8 @@ no tray icon and no installer UI.
    (skip this only if you want a plain Node.js install instead).
 2. Copy the **`agent` folder** (including `dist\`) to the target PC.
 3. Right-click **`agent\install.bat`** → **Run as administrator**
-   (it just launches `deploy.ps1` with UAC). It asks you to set an
+   (it just launches `deploy.ps1` with UAC). It asks you for the **PC name**
+   to show on the dashboard (Enter keeps the current default), then to set an
    **uninstall password** - write it down, it is needed to remove the agent.
 
 The target PC needs **no Node.js, no npm and no internet to install** when
@@ -188,18 +189,21 @@ portable copy to `%ProgramData%` by itself.
 Or from an elevated prompt, with optional flags:
 
 ```powershell
-# defaults: server = https://easyskill-windows-fy9f.onrender.com, key from agent\config.json
+# defaults: server = http://3.111.38.240, key from agent\config.json,
+# screenshots every 120 s (2 minutes), PC name prompted
 powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1
 
-# explicit values, screenshots off
+# explicit values, custom PC name, screenshots off
 powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 `
-    -ServerUrl https://easyskill-windows-fy9f.onrender.com `
-    -AgentKey <same as server AGENT_KEY> -DisableScreenshots
+    -ServerUrl http://3.111.38.240 `
+    -AgentKey <same as server AGENT_KEY> `
+    -MachineName "OFFICE-PC-01" -DisableScreenshots
 
 # non-interactive (no prompts) - good for RMM / bulk rollout.
 # -SetUninstallPassword is required here; without it a random one is
 # generated and printed once at the end of the output.
 powershell -NoProfile -ExecutionPolicy Bypass -File agent\deploy.ps1 -NonInteractive `
+    -MachineName "OFFICE-PC-01" `
     -SetUninstallPassword 'your-kept-secret'
 
 # change the uninstall password on an already-installed PC
@@ -375,7 +379,7 @@ The project is already written for it:
 | `DB_PROVIDER=mongodb but MONGODB_URI is empty` | Fill `MONGODB_URI` in `.env` / Render env |
 | MongoDB "server selection timed out" | Atlas Network Access must allow your IP (`0.0.0.0/0` for Render) |
 | `[Storage] cloudinary … credentials are incomplete` | `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET` not all set → falls back to local disk |
-| Agent `401 authentication rejected - check agentKey` | `agentKey` ≠ server `AGENT_KEY`. Confirm the key the **server** is actually using: `curl https://easyskill-windows-fy9f.onrender.com/api/agents` won't help - instead check the `AGENT_KEY` env var in the Render dashboard (it overrides `config.json` `security.agentKey`). Then re-run `deploy.ps1 -AgentKey <that value>` on the agent. |
+| Agent `401 authentication rejected - check agentKey` | `agentKey` ≠ server `AGENT_KEY`. Confirm the key the **server** is actually using: `curl http://3.111.38.240/api/agents` won't help - instead check the `AGENT_KEY` env var on the server (it overrides `config.json` `security.agentKey`). Then re-run `deploy.ps1 -AgentKey <that value>` on the agent. |
 | Agent shows no data | Check `agent/agent.log`; confirm `/api/health` and `/api/agents` |
 | Screenshot `404 File not found` | Blob missing/retention-deleted in Cloudinary, or wrong keys |
 | Login always fails | `ADMIN_USER`/`ADMIN_PASSWORD`/`ADMIN_PASSWORD_HASH` mismatch → restart service after changing |
@@ -408,8 +412,8 @@ git push origin main                      :: triggers Render auto-deploy
 
 **API smoke test**
 ```bash
-curl https://easyskill-windows-fy9f.onrender.com/api/health
-curl -X POST https://easyskill-windows-fy9f.onrender.com/api/auth/login \
+curl http://3.111.38.240/api/health
+curl -X POST http://3.111.38.240/api/auth/login \
      -H "Content-Type: application/json" \
      -d '{"username":"admin","password":"<ADMIN_PASSWORD>"}'
 ```

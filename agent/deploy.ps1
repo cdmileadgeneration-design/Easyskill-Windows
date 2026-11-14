@@ -36,7 +36,8 @@
 
   Unattended / mass deployment (no prompts):
       powershell -ExecutionPolicy Bypass -File deploy.ps1 -NonInteractive `
-                  -ServerUrl "https://your-server.onrender.com" -AgentKey "XXXX" `
+                  -ServerUrl "http://3.111.38.240" -AgentKey "XXXX" `
+                  -MachineName "PC-NAME" `
                   -SetUninstallPassword "ChooseAKeptSecret"
 
   Tamper resistance:
@@ -48,12 +49,15 @@
 #>
 
 
-[CmdletBinding()]
+    [CmdletBinding()]
 param(
     [string]$ServerUrl = '',
     [string]$AgentKey = '',
+    # Name shown on the dashboard for this PC. Empty = prompt (interactive)
+    # or fall back to the Windows computer name (non-interactive).
+    [string]$MachineName = '',
     [string]$InstallDir = '',
-    [int]$ScreenshotIntervalSec = 300,
+    [int]$ScreenshotIntervalSec = 120,
     [switch]$DisableScreenshots,
     [switch]$NonInteractive,
     [switch]$Status,
@@ -254,13 +258,15 @@ function Read-Json($path) {
 }
 
 function Write-AgentConfig {
-    param([string]$Path, [string]$Server, [string]$Key, [int]$ShotInterval, [bool]$Shots,
+    param([string]$Path, [string]$Server, [string]$Key, [string]$Machine, [int]$ShotInterval, [bool]$Shots,
           [System.Collections.IDictionary]$Security = $null)
+
+    if (-not $Machine) { $Machine = $env:COMPUTERNAME }
 
     $cfg = [ordered]@{
         serverUrl            = $Server
         agentKey             = $Key
-        machineName          = $env:COMPUTERNAME
+        machineName          = $Machine
         sendInterval         = 10000
         batchSize            = 50
         maxQueue             = 50000
@@ -894,6 +900,24 @@ if (-not $AgentKey) {
 # dashboard as unreachable).
 $ServerUrl = "$ServerUrl".TrimEnd('/')
 
+# --- 2a. machine (PC) name --------------------------------------------------
+# The name shown on the dashboard for this PC - not necessarily the Windows
+# computer name. Interactive installs prompt; -MachineName / -NonInteractive
+# use the value passed (or the previously installed / Windows name when none).
+if (-not $MachineName) {
+    $prevCfg = Read-Json (Join-Path $InstallDir 'config.json')
+    if ($prevCfg -and $prevCfg.machineName) { $MachineName = $prevCfg.machineName }
+}
+$defaultMachineName = if ($MachineName) { $MachineName } else { $env:COMPUTERNAME }
+if (-not $NonInteractive) {
+    Say ''
+    Say 'Name to show on the dashboard for this PC.'
+    $m = Read-Host " PC name [$defaultMachineName]"
+    if ($m) { $MachineName = $m } else { $MachineName = $defaultMachineName }
+    Say ''
+}
+if (-not $MachineName) { $MachineName = $env:COMPUTERNAME }
+
 # --- 2b. uninstall password -------------------------------------------------
 # The employee must not be able to remove the agent. Only a salted SHA-256
 # hash is written to disk; the plaintext below is printed once and then gone.
@@ -928,10 +952,10 @@ Ok 'Agent files copied'
 Step 'Writing configuration'
 $shots = -not $DisableScreenshots
 Write-AgentConfig -Path (Join-Path $InstallDir 'config.json') `
-    -Server $ServerUrl -Key $AgentKey -ShotInterval $ScreenshotIntervalSec -Shots $shots `
+    -Server $ServerUrl -Key $AgentKey -Machine $MachineName -ShotInterval $ScreenshotIntervalSec -Shots $shots `
     -Security $uninstallSecret.block
 Ok "Server:  $ServerUrl"
-Ok "Machine: $env:COMPUTERNAME"
+Ok "Machine: $MachineName"
 Ok "Screenshots: $(if ($shots) { "every ${ScreenshotIntervalSec}s" } else { 'disabled' })"
 if ($freshPw) {
     Ok 'Uninstall password generated (shown once):'
@@ -990,7 +1014,7 @@ Say '  DEPLOYMENT COMPLETE'
 Say '========================================================'
 Say "  Agent folder : $InstallDir"
 Say "  Dashboard    : $ServerUrl"
-Say "  Machine name : $env:COMPUTERNAME"
+Say "  Machine name : $MachineName"
 Say ''
     Say '  Behaviour:'
     Say '   - runs at PC startup (before logon) and at every user logon'
@@ -1000,7 +1024,10 @@ Say ''
     }
     Say '   - restarts within 1 minute if it is killed or crashes'
 Say '   - resumes automatically after sleep/hibernate (StartWhenAvailable)'
-Say '   - streams activity to the dashboard every 10 s'
+    Say '   - streams activity to the dashboard every 10 s'
+    if ($shots) {
+        Say "   - captures a screenshot every ${ScreenshotIntervalSec}s (2 minutes)"
+    }
 Say '   - buffers offline - events queue to disk until the server is back'
 Say '   - install folder is read-only for the logged-in user'
 Say ''

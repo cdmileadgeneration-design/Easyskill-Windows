@@ -32,7 +32,7 @@ class ScreenshotMonitor {
       return;
     }
     console.log('[ScreenshotMonitor] Starting...');
-    const interval = this.agent.config.screenshotInterval || 300000;
+    const interval = this.agent.config.screenshotInterval || 120000;
     // Capture once shortly after boot so the gallery is never empty, then on interval
     this.initialTimer = setTimeout(() => this.captureAndUpload('startup'), 15000);
     this.captureInterval = setInterval(() => this.captureAndUpload('scheduled'), interval);

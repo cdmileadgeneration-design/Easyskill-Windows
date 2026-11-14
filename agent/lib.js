@@ -35,7 +35,7 @@ const DEFAULTS = {
   sendInterval: 10000,
   batchSize: 50,
   maxQueue: 50000,
-  screenshotInterval: 300000,
+  screenshotInterval: 120000,
   idleThreshold: 300000,
   enableScreenshots: true,
   enableKeystrokeTracking: false,
