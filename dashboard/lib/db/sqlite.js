@@ -25,17 +25,28 @@ function create(cfg, shared) {
   let db = null;
   let saveTimer = null;
   let dirty = false;
+  let lastFlushAt = 0;
   const columnCache = new Map();
 
   // --- persistence ---------------------------------------------------------
+  // sql.js keeps the database in memory, so a flush exports and rewrites the
+  // WHOLE file. Saving on every insert made a flush cost grow with database
+  // size: each agent batch (every 10 s) and each heartbeat blocked the event
+  // loop for hundreds of milliseconds, which queued every dashboard request.
+  // Writes are now coalesced and the file is rewritten at most once per
+  // MIN_FLUSH_MS; a few seconds of data can be lost on a hard kill, and the
+  // agent simply resends what the server never acknowledged.
+  const MIN_FLUSH_MS = 5000;
+
   function persist(immediate = false) {
     dirty = true;
     if (immediate) return flushDb();
     if (saveTimer) return;
+    const wait = Math.max(0, MIN_FLUSH_MS - (Date.now() - lastFlushAt));
     saveTimer = setTimeout(() => {
       saveTimer = null;
       flushDb();
-    }, 500);
+    }, wait);
   }
 
   function flushDb() {
@@ -46,6 +57,7 @@ function create(cfg, shared) {
       fs.writeFileSync(tmp, data);
       fs.renameSync(tmp, dbPath);
       dirty = false;
+      lastFlushAt = Date.now();
     } catch (e) {
       console.error(`[DB] Save failed: ${e.message}`);
     }
@@ -128,6 +140,27 @@ function create(cfg, shared) {
       CREATE TABLE IF NOT EXISTS ingest_batches (
         batch_id TEXT PRIMARY KEY, machine_name TEXT, event_count INTEGER, received_at DATETIME);
     `);
+
+    // Every dashboard query filters a table by its time column (and often by
+    // machine) and sorts it. Without these, each request scanned and sorted the
+    // entire table - seconds of work once retention has accumulated.
+    db.run(`
+      CREATE INDEX IF NOT EXISTS idx_application_usage_start ON application_usage(start_time);
+      CREATE INDEX IF NOT EXISTS idx_application_usage_machine ON application_usage(machine_name);
+      CREATE INDEX IF NOT EXISTS idx_website_visits_time ON website_visits(visit_time);
+      CREATE INDEX IF NOT EXISTS idx_website_visits_machine ON website_visits(machine_name);
+      CREATE INDEX IF NOT EXISTS idx_file_activities_time ON file_activities(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_file_activities_machine ON file_activities(machine_name);
+      CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_usb_devices_time ON usb_devices(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_processes_time ON processes(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_network_connections_time ON network_connections(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_installed_software_checked ON installed_software(last_checked);
+      CREATE INDEX IF NOT EXISTS idx_screenshots_time ON screenshots(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_screenshots_machine ON screenshots(machine_name);
+      CREATE INDEX IF NOT EXISTS idx_agent_heartbeat_machine ON agent_heartbeat(machine_name);
+      CREATE INDEX IF NOT EXISTS idx_ingest_batches_received ON ingest_batches(received_at);
+    `);
     columnCache.clear();
   }
 
@@ -184,11 +217,13 @@ function create(cfg, shared) {
       const initSqlJs = require('sql.js');
       SQL = await initSqlJs();
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      db = fs.existsSync(dbPath) ? new SQL.Database(fs.readFileSync(dbPath)) : new SQL.Database();
+      const existing = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+      db = existing ? new SQL.Database(fs.readFileSync(dbPath)) : new SQL.Database();
       createSchema();
       migrate();
       api.ready = true;
       flushDb();
+      if (existing) console.log(`[DB] Loaded ${(existing / 1024 / 1024).toFixed(1)} MB from ${dbPath}`);
       return api;
     },
 
@@ -400,18 +435,16 @@ function create(cfg, shared) {
       return row ? parseStorage(row) : null;
     },
 
-    async insertScreenshot({ storage, timestamp, reason, machineName, keyId }) {
-      run(
-        `INSERT INTO screenshots (file_path, storage_json, timestamp, reason, machine_name, key_id) VALUES (?, ?, ?, ?, ?, ?)`,
+    async insertScreenshot({ storage, timestamp, reason, machineName, keyId }) {      run(`INSERT INTO screenshots (file_path, storage_json, timestamp, reason, machine_name, key_id) VALUES (?, ?, ?, ?, ?, ?)`,
         [storage?.key || null, JSON.stringify(storage || {}), timestamp, reason || 'scheduled', machineName, keyId]
       );
-      flushDb();
+      persist();
       return queryOne(`SELECT last_insert_rowid() as id`)?.id;
     },
 
     async deleteScreenshot(id) {
       run(`DELETE FROM screenshots WHERE id = ?`, [parseInt(id, 10)]);
-      flushDb();
+      persist();
     },
 
     async ingestBatch({ batchId, events, machineName }) {
@@ -452,7 +485,7 @@ function create(cfg, shared) {
         } catch (e) { errors.push(e.message); }
       }
 
-      flushDb();
+      persist();
       return { success: true, inserted, duplicate: false, errors };
     },
 
@@ -465,7 +498,7 @@ function create(cfg, shared) {
       const columns = Object.keys(doc);
       if (!columns.length) throw badRequest('no valid columns');
       run(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`, columns.map(c => doc[c]));
-      flushDb();
+      persist();
       return { success: true };
     },
 
@@ -481,7 +514,7 @@ function create(cfg, shared) {
         run(`INSERT INTO agent_heartbeat (machine_name, hostname, ip, agent_version, last_seen) VALUES (?,?,?,?,?)`,
           [machineName, hostname || '', ip || '', agentVersion || '', seenAt]);
       }
-      flushDb();
+      persist();
       return { success: true, status: 'ok' };
     },
 

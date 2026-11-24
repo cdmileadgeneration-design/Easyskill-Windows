@@ -234,8 +234,20 @@ app.get('/api/dashboard/summary', apiLimiter, authenticate, h(async (req, res) =
 // ---------------------------------------------------------------------------
 // Screenshots (encrypted at rest, stored through the storage adapter)
 // ---------------------------------------------------------------------------
+// scrypt is intentionally slow (tens of ms) and blocks the event loop, and the
+// dashboard derives a key for every screenshot it displays. Caching the keys
+// keeps opening the gallery from freezing every other request.
+const keyCache = new Map();
+const KEY_CACHE_MAX = 100;
 function deriveKey(keyId) {
-  return crypto.scryptSync(String(keyId), 'monitoring-salt', 32);
+  const id = String(keyId);
+  let key = keyCache.get(id);
+  if (!key) {
+    key = crypto.scryptSync(id, 'monitoring-salt', 32);
+    if (keyCache.size >= KEY_CACHE_MAX) keyCache.delete(keyCache.keys().next().value);
+    keyCache.set(id, key);
+  }
+  return key;
 }
 
 function encryptBuffer(buf, keyId) {
