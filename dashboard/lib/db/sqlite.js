@@ -3,6 +3,19 @@
 const fs = require('fs');
 const path = require('path');
 
+// SQLite's CURRENT_TIMESTAMP produces "YYYY-MM-DD HH:MM:SS" in UTC with no zone
+// marker. Browsers parse that form as LOCAL time, so a machine that had just
+// checked in looked hours stale and the dashboard reported every PC as
+// offline. Everything time-related is therefore stored and returned as
+// ISO-8601 UTC (matching the MongoDB backend).
+function toIsoUtc(value) {
+  if (!value) return value;
+  if (value instanceof Date) return value.toISOString();
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s.replace(' ', 'T') + 'Z';
+  return s;
+}
+
 function create(cfg, shared) {
   const dbPath = cfg.database.sqlitePath;
   const auditPath = cfg.database.auditPath;
@@ -458,12 +471,15 @@ function create(cfg, shared) {
 
     async upsertHeartbeat({ machineName, hostname, ip, agentVersion }) {
       const existing = queryOne(`SELECT id FROM agent_heartbeat WHERE machine_name = ?`, [machineName]);
+      // Explicit UTC ISO string instead of CURRENT_TIMESTAMP, so the value
+      // carries its zone and the dashboard can compute "online" correctly.
+      const seenAt = new Date().toISOString();
       if (existing) {
-        run(`UPDATE agent_heartbeat SET hostname=?, ip=?, agent_version=?, last_seen=CURRENT_TIMESTAMP WHERE machine_name=?`,
-          [hostname || '', ip || '', agentVersion || '', machineName]);
+        run(`UPDATE agent_heartbeat SET hostname=?, ip=?, agent_version=?, last_seen=? WHERE machine_name=?`,
+          [hostname || '', ip || '', agentVersion || '', seenAt, machineName]);
       } else {
-        run(`INSERT INTO agent_heartbeat (machine_name, hostname, ip, agent_version, last_seen) VALUES (?,?,?,?,CURRENT_TIMESTAMP)`,
-          [machineName, hostname || '', ip || '', agentVersion || '']);
+        run(`INSERT INTO agent_heartbeat (machine_name, hostname, ip, agent_version, last_seen) VALUES (?,?,?,?,?)`,
+          [machineName, hostname || '', ip || '', agentVersion || '', seenAt]);
       }
       flushDb();
       return { success: true, status: 'ok' };
@@ -471,7 +487,9 @@ function create(cfg, shared) {
 
     async listHeartbeats() {
       try {
-        return queryAll(`SELECT machine_name, hostname, ip, agent_version, last_seen FROM agent_heartbeat ORDER BY last_seen DESC`);
+        return queryAll(`SELECT machine_name, hostname, ip, agent_version, last_seen FROM agent_heartbeat ORDER BY last_seen DESC`)
+          // rows written before this fix still hold the zone-less format
+          .map((row) => ({ ...row, last_seen: toIsoUtc(row.last_seen) }));
       } catch (e) {
         return [];
       }
