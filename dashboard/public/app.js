@@ -777,6 +777,12 @@ function initTimelineInteraction() {
 // ---------------------------------------------------------------------------
 // Screenshots
 // ---------------------------------------------------------------------------
+// Screenshot data URLs, kept between the 20s gallery refreshes. Re-downloading
+// 200 full-size images on every refresh made the gallery slow and unreliable;
+// only captures we have not fetched yet are requested now.
+const ssCache = new Map();
+const SS_CACHE_MAX = 400;
+
 async function loadScreenshots() {
   const grid = document.getElementById('ssGrid');
   let list = [];
@@ -790,8 +796,14 @@ async function loadScreenshots() {
     return;
   }
   if (!list.length) { grid.innerHTML = '<div class="ss-empty">No screenshots yet. Click the Screenshot button to capture one.</div>'; return; }
-  grid.innerHTML = list.map(s => `<div class="ss-card" onclick="viewScreenshot('${esc(s.id)}')"><div id="ssimg-${esc(s.id)}" style="height:200px;background:#333;display:flex;align-items:center;justify-content:center;color:#666;">Loading...</div><div class="ss-info"><div class="ss-time">${new Date(s.timestamp).toLocaleString()}</div><div class="ss-reason">${esc(s.reason)}</div><div class="ss-machine">${esc(s.machine_name || 'Local')}</div></div></div>`).join('');
-  list.forEach(s => loadSSImage(s.id));
+  grid.innerHTML = list.map(s => {
+    const cached = ssCache.get(String(s.id));
+    const body = cached
+      ? `<img src="${cached}" style="width:100%;height:200px;object-fit:cover;">`
+      : 'Loading...';
+    return `<div class="ss-card" onclick="viewScreenshot('${esc(s.id)}')"><div id="ssimg-${esc(s.id)}" style="height:200px;background:#333;display:flex;align-items:center;justify-content:center;color:#666;">${body}</div><div class="ss-info"><div class="ss-time">${new Date(s.timestamp).toLocaleString()}</div><div class="ss-reason">${esc(s.reason)}</div><div class="ss-machine">${esc(s.machine_name || 'Local')}</div></div></div>`;
+  }).join('');
+  list.filter(s => !ssCache.has(String(s.id))).forEach(s => loadSSImage(s.id));
 }
 
 async function loadSSImage(id) {
@@ -799,8 +811,11 @@ async function loadSSImage(id) {
     const r = await fetch(`${API}/screenshots/base64/${esc(id)}?token=${encodeURIComponent(token)}`);
     const d = await r.json();
     if (d.image) {
+      const url = `data:${esc(d.mime || 'image/jpeg')};base64,${d.image}`;
+      ssCache.set(String(id), url);
+      while (ssCache.size > SS_CACHE_MAX) ssCache.delete(ssCache.keys().next().value);
       const el = document.getElementById(`ssimg-${esc(id)}`);
-      if (el) el.innerHTML = `<img src="data:image/jpeg;base64,${d.image}" style="width:100%;height:200px;object-fit:cover;">`;
+      if (el) el.innerHTML = `<img src="${url}" style="width:100%;height:200px;object-fit:cover;">`;
     }
   } catch (e) { /* keep the placeholder */ }
 }

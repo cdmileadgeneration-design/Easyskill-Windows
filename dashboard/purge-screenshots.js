@@ -12,7 +12,7 @@
 // delete fails the row is kept, so nothing is ever lost without a trace.
 const CFG = require('./config');
 const { createDatastore } = require('./lib/db');
-const { createStorage } = require('./lib/storage');
+const { createStorage, storageFor } = require('./lib/storage');
 
 function parseArgs(argv) {
   const out = { dryRun: false, machine: '', before: '' };
@@ -69,12 +69,13 @@ async function main() {
   for (const row of rows) {
     try {
       if (row.storage && row.storage.key) {
-        await storage.remove(row.storage);
+        // Remove from wherever this blob actually lives (may predate a storage switch).
+        await storageFor(CFG, row.storage.provider).remove(row.storage);
         blobsRemoved++;
       } else if (!row.storage && !row.file_path) {
         // no blob on record - still drop the row
       } else {
-        await storage.remove({ provider: 'local', key: row.file_path });
+        await storageFor(CFG, 'local').remove({ provider: 'local', key: row.file_path });
         blobsRemoved++;
       }
       await db.deleteScreenshot(row.id);

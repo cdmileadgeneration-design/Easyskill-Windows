@@ -106,7 +106,9 @@ Then edit `.env` and `config.json` (see section 2).
   "machineName": "",
   "sendInterval": 10000,
   "screenshotInterval": 120000,
-  "enableScreenshots": true
+  "enableScreenshots": true,
+  "screenshotMaxWidth": 1920,  // screenshots are downscaled to this width
+  "screenshotQuality": 70      // JPEG quality (30-90)
 }
 ```
 
@@ -333,12 +335,59 @@ Full detail with the exact screen fields is in **`deploy.txt`**. Short version:
 |------|--------|
 | Screenshots on Cloudinary (default) | `STORAGE_PROVIDER=cloudinary` + 3 Cloudinary keys |
 | Screenshots on local disk (dev only) | `STORAGE_PROVIDER=local` |
-| Screenshots on Amazon S3 | `STORAGE_PROVIDER=s3` + `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (on EC2/ECS/Lambda the IAM role is used automatically) |
+| Screenshots on Amazon S3 | `npm run setup-s3` (see below), or `STORAGE_PROVIDER=s3` + `S3_BUCKET`, `S3_REGION`, `S3_PREFIX` and an IAM role / `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
 | Database on MongoDB Atlas | `DB_PROVIDER=mongodb` + `MONGODB_URI` |
 | Database on local SQLite (offline/dev) | `DB_PROVIDER=sqlite` |
 
 No code changes are needed — `dashboard/lib/db/*` and `dashboard/lib/storage/*`
 are interchangeable adapters.
+
+### Screenshots on S3 with automatic 15-day deletion
+
+One command creates the bucket, blocks public access, enables encryption and
+adds a lifecycle rule that deletes screenshots N days (default 15) after upload:
+
+```bash
+cd dashboard
+npm run setup-s3 -- --region ap-south-1 --days 15
+```
+
+It reuses your bucket if you already have one (`--bucket my-shots`), reads the
+lifecycle rule back to confirm it, then writes `STORAGE_PROVIDER=s3`,
+`S3_BUCKET`, `S3_REGION`, `S3_PREFIX` and `DATA_RETENTION_DAYS` into `.env`.
+Restart the dashboard afterwards.
+
+Existing screenshots keep working: every stored blob records the provider it
+was written to, so history on local disk / Cloudinary still opens and is still
+deleted by the retention purge. Only new captures go to S3.
+
+On EC2 attach an IAM role with `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+on `<bucket>/screenshots/*` plus `s3:ListBucket` on `<bucket>` — no keys needed
+in `.env` (the script prints the exact policy JSON).
+
+Already have a bucket and rule? Point the dashboard at it instead of creating a
+new one — this only rewrites `.env` and re-checks the bucket:
+
+```bash
+cd dashboard
+npm run setup-s3 -- --bucket your-bucket-name --region ap-south-1 --days 15
+```
+
+Then restart the dashboard and prove the wiring works from that same machine:
+
+```bash
+npm run verify-s3
+```
+
+It checks credentials and the bucket, prints the lifecycle rule it finds, and
+writes/reads/deletes one throwaway object through the dashboard's own S3
+adapter. `RESULT: PASS` means new captures are going to S3; the command names
+the exact fix when something is wrong (missing IAM permissions, wrong region,
+no credentials, unreachable endpoint).
+
+Retention runs twice: S3 deletes the objects after N days, and the dashboard's
+hourly purge removes the matching database rows and blobs older than
+`DATA_RETENTION_DAYS` (the *Purge Old Data* button in Settings does it on demand).
 
 ---
 

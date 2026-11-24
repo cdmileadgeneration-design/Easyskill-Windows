@@ -11,6 +11,29 @@ const s3 = require('./s3');
 
 const ADAPTERS = { local, cloudinary, s3 };
 
+// One adapter per provider, so a screenshot written before a switch (local disk
+// or Cloudinary) can still be read and deleted after the dashboard moved to S3.
+const cache = new Map();
+
+function normalize(name) {
+  return String(name || '').toLowerCase().replace(/\s*\(fallback\)$/, '').trim();
+}
+
+// Adapter for the provider recorded on a stored screenshot reference.
+// Falls back to the configured provider when the reference has no provider.
+function storageFor(cfg, provider) {
+  const name = normalize(provider);
+  if (!name) return createStorage(cfg);
+  const adapter = ADAPTERS[name];
+  if (!adapter) return createStorage(cfg);
+  if (!cache.has(name)) {
+    const instance = adapter.create(cfg);
+    instance.name = name;
+    cache.set(name, instance);
+  }
+  return cache.get(name);
+}
+
 function createStorage(cfg) {
   const name = (cfg.storage?.provider || 'local').toLowerCase();
   const adapter = ADAPTERS[name];
@@ -32,4 +55,4 @@ function createStorage(cfg) {
   return instance;
 }
 
-module.exports = { createStorage };
+module.exports = { createStorage, storageFor };

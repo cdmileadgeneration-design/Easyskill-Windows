@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const CFG = require('./config');
 const { createDatastore } = require('./lib/db');
-const { createStorage } = require('./lib/storage');
+const { createStorage, storageFor } = require('./lib/storage');
 
 const app = express();
 
@@ -267,13 +267,20 @@ async function readScreenshotBuffer(row) {
     err.notFound = true;
     throw err;
   }
-  return storage.read(row.storage);
+  // Read through the provider that actually holds this blob: screenshots stored
+  // before a storage switch (e.g. local disk or Cloudinary -> S3) still open.
+  return storageFor(CFG, row.storage.provider).read(row.storage);
 }
 
 async function saveScreenshotRecord({ buffer, timestamp, reason, machineName, keyId, encrypted = false }) {
   const safeMachine = String(machineName || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const ts = String(timestamp || new Date().toISOString()).replace(/[:.]/g, '-');
-  const filename = `${safeMachine}_screenshot_${ts}.enc`;
+  // Sanitize everything that ends up in a storage key: Windows forbids several
+  // characters, and a slash would silently create a different path.
+  const ts = String(timestamp || new Date().toISOString()).replace(/[:.]/g, '-').replace(/[^a-zA-Z0-9_-]/g, '_');
+  // Short random suffix so two sessions on one PC capturing at the same
+  // millisecond can never overwrite each other's blob.
+  const suffix = crypto.randomBytes(3).toString('hex');
+  const filename = `${safeMachine}_screenshot_${ts}_${suffix}.enc`;
   const payload = encrypted ? buffer : encryptBuffer(buffer, keyId);
   const stored = await storage.write(payload, { filename });
   return db.insertScreenshot({
@@ -309,12 +316,21 @@ async function screenshotResponse(req, res, asImage) {
   } catch (e) {
     return res.status(500).json({ error: 'Decryption failed' });
   }
+  // Older agents saved full-screen bitmaps with a .jpg name, which are
+  // actually PNGs. Serve the real type so thumbnails render in every browser.
+  const mime = imageMimeType(image);
   if (asImage) {
-    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length });
+    res.writeHead(200, { 'Content-Type': mime, 'Content-Length': image.length });
     res.end(image);
   } else {
-    res.json({ image: image.toString('base64') });
+    res.json({ image: image.toString('base64'), mime });
   }
+}
+
+function imageMimeType(buf) {
+  if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  return 'application/octet-stream';
 }
 
 app.get('/api/screenshots', apiLimiter, authenticate, h(async (req, res) => {
@@ -389,9 +405,19 @@ app.post('/api/agent/screenshot', authenticateAgent, rateLimit('agent-ss', 60000
 
   const buffer = Buffer.from(image_data, 'base64');
   if (!buffer.length) return res.status(400).json({ error: 'empty image payload' });
-  if (buffer.length > 15 * 1024 * 1024) return res.status(413).json({ error: 'image too large' });
+  if (buffer.length > 15 * 1024 * 1024) {
+    console.warn(`[Agent] screenshot rejected: ${machine_name} sent ${Math.round(buffer.length / 1024 / 1024)}mb (limit 15mb) - agent ${machine_name} needs the JPEG screenshot build (2.2.1+)`);
+    return res.status(413).json({ error: 'image too large (max 15mb) - update the agent' });
+  }
   // Agent already encrypted it; key_id tells us how to decrypt it later
-  await saveScreenshotRecord({ buffer, timestamp, reason, machineName: machine_name, keyId: key_id || machine_name, encrypted: true });
+  try {
+    await saveScreenshotRecord({ buffer, timestamp, reason, machineName: machine_name, keyId: key_id || machine_name, encrypted: true });
+  } catch (e) {
+    // Without this the agent only sees "HTTP 500", and a full disk / exhausted
+    // storage quota is invisible in the dashboard logs.
+    console.error(`[Agent] screenshot store failed for ${machine_name}: ${e.message}`);
+    return res.status(500).json({ error: `could not store screenshot: ${e.message}` });
+  }
   res.json({ success: true });
 }));
 
@@ -463,7 +489,7 @@ app.use((err, req, res, next) => {
 async function purgeOldData() {
   const { staleScreenshots = [] } = await db.purgeExpired(RETENTION_DAYS);
   for (const ref of staleScreenshots) {
-    try { await storage.remove(ref); } catch (e) { /* best effort */ }
+    try { await storageFor(CFG, ref?.provider).remove(ref); } catch (e) { /* best effort */ }
   }
 }
 
