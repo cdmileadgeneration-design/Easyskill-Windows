@@ -1,6 +1,6 @@
 {
   "name": "monitoring-agent",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Windows employee monitoring agent - collects activity and streams it to the dashboard",
   "main": "monitor.js",
   "scripts": {

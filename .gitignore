@@ -1,6 +1,7 @@
 # secrets / local config
 /.env
 /config.json
+agent/config.json
 
 # dependencies
 node_modules/

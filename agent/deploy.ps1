@@ -57,7 +57,7 @@ param(
     # or fall back to the Windows computer name (non-interactive).
     [string]$MachineName = '',
     [string]$InstallDir = '',
-    [int]$ScreenshotIntervalSec = 120,
+    [int]$ScreenshotIntervalSec = 60,
     [switch]$DisableScreenshots,
     [switch]$NonInteractive,
     [switch]$Status,
@@ -1026,7 +1026,7 @@ Say ''
 Say '   - resumes automatically after sleep/hibernate (StartWhenAvailable)'
     Say '   - streams activity to the dashboard every 10 s'
     if ($shots) {
-        Say "   - captures a screenshot every ${ScreenshotIntervalSec}s (2 minutes)"
+        Say "   - captures a screenshot every ${ScreenshotIntervalSec}s ($([int]($ScreenshotIntervalSec / 60)) minute(s))"
     }
 Say '   - buffers offline - events queue to disk until the server is back'
 Say '   - install folder is read-only for the logged-in user'

@@ -35,7 +35,11 @@ const DEFAULTS = {
   sendInterval: 10000,
   batchSize: 50,
   maxQueue: 50000,
-  screenshotInterval: 120000,
+  screenshotInterval: 60000,
+  // Encoded screenshot size: a downscaled JPEG instead of a full-resolution
+  // PNG keeps each capture small enough to upload reliably over an office link.
+  screenshotMaxWidth: 1920,
+  screenshotQuality: 70,
   idleThreshold: 300000,
   enableScreenshots: true,
   enableKeystrokeTracking: false,

@@ -7,7 +7,7 @@ const https = require('https');
 
 const { parseArgs, applyProfile, loadConfig, userTag, appendLog, statePath } = require('./lib');
 
-const AGENT_VERSION = '2.2.0';
+const AGENT_VERSION = '2.2.1';
 
 // Session context flags (--profile/--user/--session) must be applied before any
 // monitor reads os.homedir() / process.env.LOCALAPPDATA, otherwise a supervisor
@@ -166,7 +166,11 @@ class MonitoringAgent extends EventEmitter {
     return '127.0.0.1';
   }
 
-  post(endpoint, body) {
+  // `options.timeoutMs` lets a caller give a slow/large request (screenshots)
+  // more time than the small activity batches. It was previously ignored, so a
+  // multi-MB screenshot upload was always cut off at 15s and re-queued.
+  post(endpoint, body, options = {}) {
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
     return new Promise((resolve, reject) => {
       let url;
       try {
@@ -186,10 +190,11 @@ class MonitoringAgent extends EventEmitter {
           'X-Agent-Key': this.config.agentKey,
           'Content-Length': Buffer.byteLength(data)
         },
-        timeout: 15000
+        timeout: timeoutMs
       }, (res) => {
         let raw = '';
         res.on('data', (chunk) => { raw += chunk; });
+        res.on('error', reject);
         res.on('end', () => {
           let parsed = null;
           try { parsed = JSON.parse(raw); } catch (e) { parsed = { error: raw.slice(0, 200) }; }
@@ -198,13 +203,13 @@ class MonitoringAgent extends EventEmitter {
             if (res.statusCode === 401) {
               return reject(new Error(`authentication rejected - check agentKey matches the server (${msg})`));
             }
-            return reject(new Error(msg));
+            return reject(new Error(`HTTP ${res.statusCode}: ${msg}`));
           }
           resolve(parsed);
         });
       });
       req.on('error', reject);
-      req.setTimeout(15000, () => { req.destroy(new Error('timeout')); });
+      req.setTimeout(timeoutMs, () => { req.destroy(new Error(`timeout after ${Math.round(timeoutMs / 1000)}s`)); });
       req.write(data);
       req.end();
     });
